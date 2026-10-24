@@ -1,0 +1,8 @@
+/target
+# Local agent workflow notes and design scratch (not part of the app).
+AGENTS.md
+CLAUDE.md
+.claude/
+/new_design/
+/docs/*
+!/docs/screenshots/
