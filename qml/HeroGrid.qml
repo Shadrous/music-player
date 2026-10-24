@@ -1,7 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import music_player
+import spinwave
 
 // Home / search view: header (now playing or the search context), the song
 // list with a Songs | Up next switch + autoplay, then album and artist

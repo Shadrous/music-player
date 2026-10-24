@@ -1,7 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import music_player
+import spinwave
 
 // Library surface: the account's playlists, playlist detail, and history.
 // All loading is background + polled; rows are metadata-only. Rows are a

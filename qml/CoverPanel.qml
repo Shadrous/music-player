@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Layouts
-import music_player
+import spinwave
 
 // Art pane (360px, radius 28): the current cover, or the design's spinning
 // M3 shapes when there is no art, with the queue-position chip. Layout only;

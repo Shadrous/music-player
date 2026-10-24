@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Layouts
-import music_player
+import spinwave
 
 // Song row (min 56px): number or equalizer, title + artist/album, liked
 // heart, duration. The current track (matched by video id) sits on a

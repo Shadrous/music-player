@@ -1,7 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import music_player
+import spinwave
 
 // Waiting surface for the native sign-in window. Rust starts an ephemeral
 // WebKitGTK process; the user finishes the Google flow in that window, and

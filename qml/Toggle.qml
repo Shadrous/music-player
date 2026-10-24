@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Layouts
-import music_player
+import spinwave
 
 // Label + M3 switch (52x32 track; 24px handle with a check when on, 16px
 // outline handle when off).

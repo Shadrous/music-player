@@ -42,7 +42,7 @@ pub mod http;
 use ytmusicapi::{AuthHeaders, YTMusic};
 
 /// OS-keyring identity for the stored browser cookie blob.
-pub const KEYRING_SERVICE: &str = "music-player";
+pub const KEYRING_SERVICE: &str = "spinwave";
 /// OS-keyring username for the stored browser cookie blob.
 pub const KEYRING_USER_COOKIE: &str = "ytmusic-browser-cookie";
 

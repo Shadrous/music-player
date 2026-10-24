@@ -386,13 +386,13 @@ async fn signature_timestamp(yt: &ytmusicapi::YTMusic) -> Option<i64> {
     match yt.get_signature_timestamp(None).await {
         Ok(ts) => {
             let _ = SIGNATURE_TIMESTAMP.set(ts);
-            if std::env::var("MUSIC_PLAYER_DEBUG_AUDIO").as_deref() == Ok("1") {
+            if std::env::var("SPINWAVE_DEBUG_AUDIO").as_deref() == Ok("1") {
                 eprintln!("playback: signature timestamp resolved");
             }
             Some(ts)
         }
         Err(_) => {
-            if std::env::var("MUSIC_PLAYER_DEBUG_AUDIO").as_deref() == Ok("1") {
+            if std::env::var("SPINWAVE_DEBUG_AUDIO").as_deref() == Ok("1") {
                 eprintln!("playback: signature timestamp unavailable; using default");
             }
             None

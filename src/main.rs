@@ -1176,7 +1176,7 @@ impl Backend {
     #[qslot]
     fn start_browser_signin(&mut self) -> String {
         self.cancel_browser_signin();
-        let python = std::env::var("MUSIC_PLAYER_PYTHON").unwrap_or_else(|_| "python3".to_string());
+        let python = std::env::var("SPINWAVE_PYTHON").unwrap_or_else(|_| "python3".to_string());
         let child = std::process::Command::new(&python)
             .arg("-c")
             .arg(crate::auth::BROWSER_LOGIN_HELPER)
@@ -1736,7 +1736,7 @@ impl Backend {
             self.emit_playback_props();
             return "error".to_string();
         }
-        if std::env::var("MUSIC_PLAYER_DEBUG_AUDIO").as_deref() == Ok("1") {
+        if std::env::var("SPINWAVE_DEBUG_AUDIO").as_deref() == Ok("1") {
             eprintln!("playback: started {}", pending.video_id);
         }
         let duration = ticket.duration_secs().unwrap_or(pending.row_duration);
@@ -1802,12 +1802,12 @@ fn maybe_restore_keyring_at_startup_log() {
 }
 
 /// Env override for the QML entry point (resolution step (a)).
-const QML_DIR_ENV_VAR: &str = "MUSIC_PLAYER_QML_DIR";
+const QML_DIR_ENV_VAR: &str = "SPINWAVE_QML_DIR";
 
 /// Resolve the QML entry point from disk (never `qrc:`).
 ///
 /// Resolution order:
-/// (a) `$MUSIC_PLAYER_QML_DIR/main.qml` when the env var is set,
+/// (a) `$SPINWAVE_QML_DIR/main.qml` when the env var is set,
 /// (b) executable-relative walk-up — `<exe-dir>/qml`, `<exe-dir>/../qml`,
 ///     `<exe-dir>/../../qml` (covers installed and `target/debug` layouts),
 /// (c) compile-time `CARGO_MANIFEST_DIR/qml/main.qml` (source-tree fallback —
@@ -2416,7 +2416,7 @@ mod tests {
     /// `main.qml` files inside it; removed best-effort at the end.
     fn qml_scratch(name: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!(
-            "music_player_qml_{}_{}_{}",
+            "spinwave_qml_{}_{}_{}",
             name,
             std::process::id(),
             std::time::SystemTime::now()

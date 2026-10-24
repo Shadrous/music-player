@@ -35,7 +35,7 @@ Rust under the hood, a Qt Quick UI in Material 3 Expressive on top.
 - **Requires YouTube Music Premium.** Playback is gated on a verified Premium account. The app never removes, skips or blocks ads.
 - **Streams only.** Nothing is downloaded, saved or exported. Stream URLs live in memory only and are never logged or written to disk.
 - **Secrets stay in your OS keyring.** Sign-in happens in a separate browser window, so your password never touches the app. The resulting session cookie goes straight to the system keyring, and logs are redacted.
-- **Cache is metadata only.** `~/.cache/music-player/` holds titles, ids and artwork links. Settings live in `~/.config/music-player/`.
+- **Cache is metadata only.** `~/.cache/spinwave/` holds titles, ids and artwork links. Settings live in `~/.config/spinwave/`.
 
 This is an unofficial client and is not affiliated with or endorsed by Google or YouTube.
 
@@ -49,7 +49,7 @@ Linux for now; other platforms are planned.
 - ALSA/PipeWire audio (playback uses `rodio`)
 - A Secret Service keyring (GNOME Keyring, KWallet, …)
 - For browser sign-in: `python3-gobject` and `webkit2gtk4.1`. Without them, the app falls back to pasting a cookie header.
-- Fonts: [Material Symbols Rounded](https://fonts.google.com/icons), [Google Sans Flex](https://fonts.google.com/specimen/Google+Sans+Flex) and [Roboto](https://fonts.google.com/specimen/Roboto). Put them in `~/.local/share/fonts/music-player/` and run `fc-cache -f`; without them, icons show up as words.
+- Fonts: [Material Symbols Rounded](https://fonts.google.com/icons), [Google Sans Flex](https://fonts.google.com/specimen/Google+Sans+Flex) and [Roboto](https://fonts.google.com/specimen/Roboto). Put them in `~/.local/share/fonts/spinwave/` and run `fc-cache -f`; without them, icons show up as words.
 
 **Build and run**
 

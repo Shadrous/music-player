@@ -1629,24 +1629,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "743fb55ba31b18fb1ecef6bdc9aa2743314978ac084044301a7eee33fb99a20d"
 
 [[package]]
-name = "music_player"
-version = "0.1.0"
-dependencies = [
- "cxx",
- "cxx-build",
- "keyring",
- "linkme",
- "qtbridge",
- "qtbridge-build-utils",
- "reqwest",
- "rodio",
- "serde",
- "serde_json",
- "tokio",
- "ytmusic-rs",
-]
-
-[[package]]
 name = "native-tls"
 version = "0.2.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2599,6 +2581,24 @@ checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
 dependencies = [
  "libc",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "spinwave"
+version = "0.1.0"
+dependencies = [
+ "cxx",
+ "cxx-build",
+ "keyring",
+ "linkme",
+ "qtbridge",
+ "qtbridge-build-utils",
+ "reqwest",
+ "rodio",
+ "serde",
+ "serde_json",
+ "tokio",
+ "ytmusic-rs",
 ]
 
 [[package]]

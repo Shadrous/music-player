@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Layouts
-import music_player
+import spinwave
 
 // Icon + label pill (Play / Shuffle / Start radio / Upgrade). `outlined`
 // draws the outline-variant border on a transparent fill.

@@ -2,7 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Shapes
-import music_player
+import spinwave
 
 // Docked player: now-playing + like | shuffle, prev, play, next, repeat |
 // volume + up-next toggle, then a wavy progress lane that seeks on click.

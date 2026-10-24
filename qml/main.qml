@@ -1,7 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import music_player
+import spinwave
 
 // Shell: 80px nav rail | 360px art pane | content column (search, the
 // persistent Home/Library views, docked player). Navigation + dialog

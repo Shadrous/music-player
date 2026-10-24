@@ -1,4 +1,4 @@
-//! User preferences in `~/.config/music-player/prefs.json` (or
+//! User preferences in `~/.config/spinwave/prefs.json` (or
 //! `$XDG_CONFIG_HOME`): small booleans the Settings page toggles. Missing or
 //! malformed files fall back to the defaults. Disabled under `cfg(test)`.
 
@@ -33,7 +33,7 @@ fn path() -> Option<std::path::PathBuf> {
     let base = std::env::var_os("XDG_CONFIG_HOME")
         .map(std::path::PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".config")))?;
-    Some(base.join("music-player").join("prefs.json"))
+    Some(base.join("spinwave").join("prefs.json"))
 }
 
 #[cfg(not(test))]

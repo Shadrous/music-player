@@ -1,7 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import music_player
+import spinwave
 
 // M3 dialog shell: optional icon + headline, themed surface and scrim, no
 // Fusion title bar or stock buttons. Content goes in `contentItem`; actions

@@ -1,5 +1,5 @@
 import QtQuick
-import music_player
+import spinwave
 
 // Material Symbols Rounded glyph by ligature name (`play_arrow`, `favorite`).
 // The font is installed per-user (see README); `filled` drives the FILL axis.

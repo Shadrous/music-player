@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Effects
-import music_player
+import spinwave
 
 // Async cover art clipped to a rounded rectangle. `ready` is true once the
 // image loaded, so callers can show their fallback underneath until then.

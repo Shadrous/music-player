@@ -1,7 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import music_player
+import spinwave
 
 // Fallback sign-in for environments where the embedded browser cannot open
 // (or when the user prefers their existing browser session). Accepts the same

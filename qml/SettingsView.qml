@@ -1,7 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import music_player
+import spinwave
 
 // Settings: account (sign-in state + actions), playback resume, and
 // appearance (light/dark + color seed, saved by the Rust Theme singleton).

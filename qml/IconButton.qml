@@ -1,5 +1,5 @@
 import QtQuick
-import music_player
+import spinwave
 
 // Round icon button with an M3 state layer. `toggle` buttons morph to a
 // 12px-radius secondary-container square when `checked` (design `toggle()`);

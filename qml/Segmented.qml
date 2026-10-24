@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Layouts
-import music_player
+import spinwave
 
 // Outlined M3 segmented buttons. `model`: [{ icon, label, text? }]. With
 // `text`, the selected segment swaps its icon for a check (design).

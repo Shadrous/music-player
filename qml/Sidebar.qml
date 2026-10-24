@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Layouts
-import music_player
+import spinwave
 
 // 80px navigation rail: brand mark, destinations, account avatar. Layout
 // only: emits navigate()/openLogin(); session state comes from Backend.
