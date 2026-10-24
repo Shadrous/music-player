@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Ephemeral WebKitGTK sign-in window for the music player.
+"""Ephemeral WebKitGTK sign-in window for Spinwave.
 
 The app starts this helper for the "Continue with browser" action. It opens
 Google's YouTube Music sign-in flow in a throwaway WebKitGTK data store, polls

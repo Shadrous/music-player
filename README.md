@@ -1,11 +1,11 @@
 <div align="center">
 
-# Music Player
+# Spinwave
 
 **A fast, good-looking desktop client for YouTube Music Premium.**<br>
 Rust under the hood, a Qt Quick UI in Material 3 Expressive on top.
 
-![Music Player in Ember light and Ocean dark](docs/screenshots/hero.png)
+![Spinwave in Ember light and Ocean dark](docs/screenshots/hero.png)
 
 </div>
 
