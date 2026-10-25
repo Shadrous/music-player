@@ -13,11 +13,12 @@ Rust under the hood, a Qt Quick UI in Material 3 Expressive on top.
 
 - **Material 3 Expressive design.** Shape-morphing buttons, a large art pane, a docked player and the app's own title bar. Five color seeds (Mono, Ember, Ocean, Forest, Orchid), each in light and dark.
 - **Opens instantly.** The last sign-in result plus home, library and playlist rows come from a small metadata-only disk cache, so the app is usable before the network answers. Fresh data then replaces it in the background.
-- **Picks up where you left off.** Close the app mid-song and it reopens on the same queue, paused at the same second. Both behaviours can be switched off in Settings.
+- **Picks up where you left off.** Close the app mid-song and it reopens on the same queue, paused at the same second. The song is already loaded and seeked in the background, so Play starts instantly. Both behaviours can be switched off in Settings.
 - **Handles big playlists.** Playlists load page by page as you scroll, and the list is virtualized, so even a fully loaded playlist with thousands of songs only draws the rows on screen.
 - **Better search.** Merges the signed-in and guest Songs results, then ranks by how well the title matches and by play count. So "Hello" finds Adele first.
 - **Lyrics.** Tap the mic button and the art pane turns into the song's lyrics over a blurred, tinted cover, whenever YouTube Music has them.
 - **Your YouTube likes.** Hearts come from your Liked Music, and liking a song here likes it on YouTube Music too.
+- **Works with your OS media controls.** GNOME's media panel, media keys and the lock screen see what's playing and can control it (MPRIS).
 - **Low-performance mode.** One switch in Settings turns off animations and next-song preloading, and draws without the graphics card, for older or busy machines.
 - **Queue that makes sense.** Playing a row queues the list around it. Shuffle, repeat one/all, radio and autoplay of similar songs are all there, and the next track is prefetched so Next is instant.
 

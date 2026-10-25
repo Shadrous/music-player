@@ -51,6 +51,14 @@ ApplicationWindow {
         running: Backend.sessionLoading
         onTriggered: Backend.pollSession()
     }
+    // OS media controls (media keys, GNOME/Windows panels) arrive on another
+    // thread; apply them here.
+    Timer {
+        interval: 250
+        repeat: true
+        running: true
+        onTriggered: Backend.pollMediaKeys()
+    }
     // Playback URL/refill loads run on a worker; poll until the ticket lands.
     Timer {
         interval: 100

@@ -181,7 +181,7 @@ Rectangle {
                     onClicked: Backend.cycleLoop()
                 }
                 IconButton {
-                    icon: "mic"
+                    icon: "mic_external_on"
                     label: card.lyricsOn ? qsTr("Hide lyrics") : qsTr("Show lyrics")
                     iconSize: 22
                     toggle: true

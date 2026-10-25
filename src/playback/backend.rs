@@ -72,6 +72,34 @@ pub struct RodioBackend {
     volume: f32,
     playing: bool,
     current_video: Option<String>,
+    // Seconds a pre-seeked stream started at: rodio counts its position
+    // from the appended source, so `position_secs` adds this back.
+    pos_offset: u32,
+}
+
+/// A stream opened (and already seeked) off the UI thread by
+/// [`open_prepared`]; [`RodioBackend::play_prepared`] starts it instantly.
+pub struct PreparedStream {
+    decoder: rodio::Decoder<HttpAudioStream>,
+    video_id: String,
+    start_secs: u32,
+}
+
+/// Open the ticket's stream and seek to `start_secs` on the CALLER's thread
+/// (a worker): the seek's range fetches would otherwise block the UI.
+pub fn open_prepared(ticket: &StreamTicket, start_secs: u32) -> Result<PreparedStream, PlaybackError> {
+    if !ticket.stream_url().starts_with("https://") {
+        return Err(PlaybackError::Transport);
+    }
+    let stream = HttpAudioStream::new(ticket.stream_url().to_string(), ticket.user_agent(), ticket.prefetched())?;
+    let mut decoder = rodio::Decoder::new(stream).map_err(|_| PlaybackError::Transport)?;
+    use rodio::Source;
+    // A failed seek just starts from the top (better than no playback).
+    let start_secs = match decoder.try_seek(Duration::from_secs(u64::from(start_secs))) {
+        Ok(()) => start_secs,
+        Err(_) => 0,
+    };
+    Ok(PreparedStream { decoder, video_id: ticket.video_id().to_string(), start_secs })
 }
 
 impl Default for RodioBackend {
@@ -87,7 +115,30 @@ impl RodioBackend {
             volume: 0.8,
             playing: false,
             current_video: None,
+            pos_offset: 0,
         }
+    }
+
+    /// Start a [`PreparedStream`] (no network on this thread); `paused`
+    /// leaves it loaded and silent so a later `resume` is instant.
+    pub fn play_prepared(&mut self, prepared: PreparedStream, paused: bool) -> Result<(), PlaybackError> {
+        self.drop_active();
+        let mut sink = rodio::DeviceSinkBuilder::open_default_sink().map_err(|_| PlaybackError::BackendUnavailable)?;
+        sink.log_on_drop(false);
+        let player = rodio::Player::connect_new(sink.mixer());
+        if paused {
+            player.pause();
+        }
+        player.append(prepared.decoder);
+        player.set_volume(clamp_volume(self.volume));
+        if !paused {
+            player.play();
+        }
+        self.active = Some(ActiveStream { _sink: sink, player, volume: self.volume });
+        self.playing = !paused;
+        self.pos_offset = prepared.start_secs;
+        self.current_video = Some(prepared.video_id);
+        Ok(())
     }
 
     fn drop_active(&mut self) {
@@ -131,6 +182,7 @@ impl AudioBackend for RodioBackend {
             }
             PlaybackError::Transport
         })?;
+        self.pos_offset = 0;
         player.append(decoder);
         player.set_volume(clamp_volume(self.volume));
         player.play();
@@ -172,7 +224,10 @@ impl AudioBackend for RodioBackend {
 
     fn seek(&mut self, secs: u32) {
         if let Some(active) = &self.active {
-            let _ = active.player.try_seek(Duration::from_secs(u64::from(secs)));
+            // rodio's own position becomes absolute after a seek.
+            if active.player.try_seek(Duration::from_secs(u64::from(secs))).is_ok() {
+                self.pos_offset = 0;
+            }
         }
     }
 
@@ -188,6 +243,7 @@ impl AudioBackend for RodioBackend {
         self.active
             .as_ref()
             .map_or(0, |a| a.player.get_pos().as_secs().min(u64::from(u32::MAX)) as u32)
+            .saturating_add(self.pos_offset)
     }
 
     fn is_finished(&self) -> bool {

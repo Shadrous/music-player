@@ -5,6 +5,7 @@ mod disk_cache;
 mod legal;
 mod models;
 mod playback;
+mod media_controls;
 mod prefs;
 mod premium_gate;
 mod theme;
@@ -81,6 +82,8 @@ pub struct Backend {
     low_performance: bool,
     // Restored track not started yet: (video id, second to seek to on Play).
     resume_at: Option<(String, u32)>,
+    // OS media controls (MPRIS/SMTC); `None` until launch or if unavailable.
+    media: Option<crate::media_controls::Media>,
     // Queue model (see `crate::playback::queue`): transport slots drive
     // this instead of ad-hoc fields. Starts EMPTY (explicit empty state —
     // never a seeded demo track); the first live fill (row tap via
@@ -226,11 +229,17 @@ struct PendingPlayback {
     title: String,
     artist: String,
     row_duration: u32,
+    // Start here (seeked on the worker, not the UI thread).
+    start_at: u32,
+    // Launch warm-up of the restored song: open it paused, touch no UI.
+    prepare: bool,
 }
 
 /// Worker result: a short-lived ticket + radio refill, or a fail-closed error.
 /// The ticket lives only in memory and is dropped after `play_stream`.
 struct PlaybackLoad {
+    // Stream opened + seeked on the worker when `start_at > 0`.
+    prepared: Option<crate::playback::backend::PreparedStream>,
     token: u64,
     ticket: Option<crate::playback::StreamTicket>,
     refill: Vec<QueueItem>,
@@ -268,6 +277,7 @@ impl Default for Backend {
             resume_position: crate::prefs::load().resume_position,
             low_performance: crate::prefs::load().low_performance,
             resume_at: None,
+            media: None,
             queue: Queue::new(),
             audio: RodioBackend::new(),
             playback_token: 0,
@@ -484,12 +494,19 @@ impl Backend {
         self.playback_token = self.playback_token.wrapping_add(1);
         let token = self.playback_token;
         self.audio.stop();
+        // A restored song resumes at its saved second.
+        let start_at = match self.resume_at.take() {
+            Some((id, at)) if id == video_id => at,
+            _ => 0,
+        };
         self.pending_playback = Some(PendingPlayback {
             token,
             video_id: video_id.to_string(),
             title: title.to_string(),
             artist: artist.to_string(),
             row_duration,
+            start_at,
+            prepare: false,
         });
         if set_queue {
             let mut item = QueueItem::new(video_id, title, artist);
@@ -500,12 +517,50 @@ impl Backend {
         self.artist = artist.to_string();
         self.set_now_playing_id(video_id);
         self.cover_source = thumbnail_url.unwrap_or("").to_string();
-        self.position = 0;
+        self.position = start_at.min(i32::MAX as u32) as i32;
         self.duration = row_duration.min(i32::MAX as u32) as i32;
         self.is_playing = false;
         self.playback_state = PlaybackState::Loading.as_str().to_string();
         self.error_message.clear();
         self.refresh_queue_view();
+        if !self.spawn_playback_load(token, video_id, start_at) {
+            self.pending_playback = None;
+            let msg = crate::playback::PlaybackError::Transport.to_string();
+            self.apply_error_block(title, artist, &msg);
+        }
+        self.emit_playback_props();
+    }
+
+    /// Launch warm-up: fetch, open and seek the restored song on a worker
+    /// and leave it loaded but paused, so Play just unpauses. The restored
+    /// UI is untouched; any failure silently leaves the normal Play path.
+    fn prepare_resumed(&mut self) {
+        if self.low_performance {
+            return;
+        }
+        let Some((video_id, start_at)) = self.resume_at.clone() else {
+            return;
+        };
+        self.playback_token = self.playback_token.wrapping_add(1);
+        let token = self.playback_token;
+        self.pending_playback = Some(PendingPlayback {
+            token,
+            video_id: video_id.clone(),
+            title: self.title.clone(),
+            artist: self.artist.clone(),
+            row_duration: self.duration.max(0) as u32,
+            start_at,
+            prepare: true,
+        });
+        if !self.spawn_playback_load(token, &video_id, start_at) {
+            self.pending_playback = None;
+        }
+    }
+
+    /// The playback worker: ticket (+ radio refill, + the opened, seeked
+    /// stream when `start_at > 0`) pushed to `playback_load` for
+    /// [`Backend::poll_playback`]. `false` if the thread didn't start.
+    fn spawn_playback_load(&self, token: u64, video_id: &str, start_at: u32) -> bool {
         if let Ok(mut slot) = self.playback_load.lock() {
             slot.clear();
         }
@@ -520,6 +575,8 @@ impl Backend {
         let spawned = std::thread::Builder::new()
             .name("playback-load".to_string())
             .spawn(move || {
+                let started = std::time::Instant::now();
+                let debug = std::env::var("SPINWAVE_DEBUG_AUDIO").as_deref() == Ok("1");
                 let outcome = (|| {
                     let store = crate::auth::KeyringStore;
                     let (_session, yt) = match crate::auth::Session::restore(&store) {
@@ -534,6 +591,9 @@ impl Backend {
                         .map_err(|_| crate::playback::PlaybackError::Transport)?;
                     let source = crate::playback::LiveUrlSource::new(&yt, &gate);
                     let ticket = runtime.block_on(source.fetch_url(&vid))?;
+                    if debug {
+                        eprintln!("playback: ticket after {} ms", started.elapsed().as_millis());
+                    }
                     let refill = if need_refill {
                         runtime
                             .block_on(source.refill_tracks(
@@ -544,17 +604,23 @@ impl Backend {
                     } else {
                         Vec::new()
                     };
-                    Ok((ticket, refill))
+                    // Seeking reads several ranges; do it here, not on the UI thread.
+                    let prepared = (start_at > 0)
+                        .then(|| crate::playback::backend::open_prepared(&ticket, start_at).ok())
+                        .flatten();
+                    Ok((ticket, refill, prepared))
                 })();
                 if let Ok(mut slot) = slot.lock() {
                     slot.push(match outcome {
-                        Ok((ticket, refill)) => PlaybackLoad {
+                        Ok((ticket, refill, prepared)) => PlaybackLoad {
+                            prepared,
                             token,
                             ticket: Some(ticket),
                             refill,
                             error: None,
                         },
                         Err(error) => PlaybackLoad {
+                            prepared: None,
                             token,
                             ticket: None,
                             refill: Vec::new(),
@@ -563,15 +629,30 @@ impl Backend {
                     });
                 }
             });
-        if spawned.is_err() {
-            self.pending_playback = None;
-            let msg = crate::playback::PlaybackError::Transport.to_string();
-            self.apply_error_block(title, artist, &msg);
-        }
-        self.emit_playback_props();
+        spawned.is_ok()
     }
 
     /// Emit every playback-related QML prop after a request/poll transition.
+    /// Fetch `video_id`'s stream ticket on a worker into the memory-only
+    /// ticket cache, so starting it later skips the player round trip.
+    /// Skipped in low-performance mode.
+    fn prefetch_ticket(&self, video_id: String) {
+        if video_id.is_empty()
+            || self.low_performance
+            || crate::playback::cached_ticket(&video_id).is_some()
+        {
+            return;
+        }
+        let gate = self.gate.clone();
+        std::thread::spawn(move || {
+            let Some((yt, runtime)) = restored_client() else {
+                return;
+            };
+            let source = crate::playback::LiveUrlSource::new(&yt, &gate);
+            let _ = runtime.block_on(source.fetch_url(&video_id));
+        });
+    }
+
     fn save_prefs(&self) {
         crate::prefs::save(crate::prefs::Prefs {
             resume: self.resume_enabled,
@@ -644,7 +725,28 @@ impl Backend {
         true
     }
 
+    /// Push the now-playing state to the OS media controls (changes only,
+    /// or always when `force`, e.g. after a seek).
+    fn sync_media(&mut self, force: bool) {
+        let Some(media) = self.media.as_mut() else {
+            return;
+        };
+        media.sync(
+            &crate::media_controls::NowPlaying {
+                video_id: &self.video_id,
+                title: &self.title,
+                artist: &self.artist,
+                cover_url: &self.cover_source,
+                duration_secs: self.duration,
+                position_secs: self.position,
+                playing: self.is_playing,
+            },
+            force,
+        );
+    }
+
     fn emit_playback_props(&mut self) {
+        self.sync_media(false);
         self.title_changed();
         self.artist_changed();
         self.position_changed();
@@ -1058,8 +1160,40 @@ impl Backend {
 
     /// Launch: reopen the saved queue paused on its track (Play starts it,
     /// at the saved second when that setting is on).
+    /// Apply queued OS media-control events (QML polls this; the OS calls
+    /// arrive on another thread).
+    #[qslot]
+    fn poll_media_keys(&mut self) {
+        use crate::media_controls::{Event, SeekDirection};
+        let Some(events) = self.media.as_ref().map(|m| m.take_events()) else {
+            return;
+        };
+        let by = |dir: SeekDirection, secs: i32| match dir {
+            SeekDirection::Forward => secs,
+            SeekDirection::Backward => -secs,
+        };
+        for event in events {
+            match event {
+                Event::Play if !self.is_playing => self.toggle_play(),
+                Event::Pause | Event::Stop if self.is_playing => self.toggle_play(),
+                Event::Toggle => self.toggle_play(),
+                Event::Next => self.next(),
+                Event::Previous => self.prev(),
+                Event::Seek(dir) => self.seek_to(self.position + by(dir, 10)),
+                Event::SeekBy(dir, d) => self.seek_to(self.position + by(dir, d.as_secs().min(3600) as i32)),
+                Event::SetPosition(p) => self.seek_to(p.0.as_secs().min(i32::MAX as u64) as i32),
+                Event::SetVolume(v) => self.set_volume(v),
+                _ => {}
+            }
+        }
+    }
+
     #[qslot]
     fn restore_playback_session(&mut self) {
+        // Launch hook: register with the OS media controls once.
+        if self.media.is_none() {
+            self.media = crate::media_controls::Media::start();
+        }
         if !self.resume_enabled || self.queue.current().is_some() {
             return;
         }
@@ -1067,6 +1201,8 @@ impl Backend {
             return;
         };
         if self.apply_saved_playback(&saved) {
+            // Most launches end in Play on this song: open it now, paused.
+            self.prepare_resumed();
             self.audio.set_volume(self.volume as f32);
             self.emit_playback_props();
             self.volume_changed();
@@ -1102,6 +1238,7 @@ impl Backend {
             self.audio.pause();
         }
         self.is_playing_changed();
+        self.sync_media(false);
     }
 
     /// Previous: past the first 3 s restart the current track; otherwise
@@ -1648,6 +1785,10 @@ impl Backend {
         let clamped = pos.clamp(0, self.duration.max(0));
         if let Some((_, at)) = self.resume_at.as_mut() {
             *at = clamped as u32;
+            // A warm-up opened at the old second; Play takes the normal path.
+            if self.pending_playback.as_ref().is_some_and(|p| p.prepare) {
+                self.pending_playback = None;
+            }
             self.position = clamped;
             self.position_changed();
             return;
@@ -1656,6 +1797,7 @@ impl Backend {
             self.audio.seek(clamped as u32);
             self.position = clamped;
             self.position_changed();
+            self.sync_media(true);
         }
     }
 
@@ -1672,6 +1814,9 @@ impl Backend {
             let item = self.queue.advance();
             self.play_or_stop(item);
             return;
+        }
+        if self.pending_playback.as_ref().is_some_and(|p| p.prepare) {
+            self.poll_playback();
         }
         // Restored and not started: nothing is streaming, keep the saved second.
         if self.resume_at.is_some() {
@@ -1728,6 +1873,9 @@ impl Backend {
             Some(pending) => pending,
             None => return "idle".to_string(),
         };
+        if pending.prepare {
+            return self.finish_prepare(&pending, load);
+        }
         if let Some(error) = load.error {
             match error {
                 crate::playback::PlaybackError::LoggedOut
@@ -1753,7 +1901,16 @@ impl Backend {
             self.emit_playback_props();
             return "error".to_string();
         }
-        if let Err(error) = self.audio.play_stream(&ticket) {
+        let started = match load.prepared {
+            Some(prepared) => self.audio.play_prepared(prepared, false),
+            None => self.audio.play_stream(&ticket).map(|()| {
+                // Fallback when the worker couldn't pre-seek: seek here.
+                if pending.start_at > 0 {
+                    self.audio.seek(pending.start_at);
+                }
+            }),
+        };
+        if let Err(error) = started {
             let msg = playback_error_message(error);
             self.apply_error_block(&pending.title, &pending.artist, &msg);
             self.emit_playback_props();
@@ -1766,13 +1923,7 @@ impl Backend {
         if duration > 0 {
             self.duration = duration.min(i32::MAX as u32) as i32;
         }
-        self.position = 0;
-        if let Some((id, at)) = self.resume_at.take() {
-            if id == pending.video_id && at > 0 {
-                self.audio.seek(at);
-                self.position = at.min(i32::MAX as u32) as i32;
-            }
-        }
+        self.position = self.audio.position_secs().min(i32::MAX as u32) as i32;
         self.is_playing = true;
         self.playback_state = PlaybackState::Playing.as_str().to_string();
         self.error_message.clear();
@@ -1789,24 +1940,41 @@ impl Backend {
             }
         }
         self.refresh_queue_view();
-        // Prefetch the next row's ticket on a worker so Next is instant when
-        // the queue is list-seeded. Cache is 90 s, memory-only.
+        // Prefetch the next row's ticket so Next is instant.
         if let Some(next) = self.queue.next_up().cloned() {
-            if !next.video_id.is_empty()
-                && !self.low_performance
-                && crate::playback::cached_ticket(&next.video_id).is_none()
-            {
-                let gate = self.gate.clone();
-                let vid = next.video_id;
-                std::thread::spawn(move || {
-                    let Some((yt, runtime)) = restored_client() else {
-                        return;
-                    };
-                    let source = crate::playback::LiveUrlSource::new(&yt, &gate);
-                    let _ = runtime.block_on(source.fetch_url(&vid));
-                });
-            }
+            self.prefetch_ticket(next.video_id);
         }
+        self.emit_playback_props();
+        "ok".to_string()
+    }
+
+    /// Land a launch warm-up: the restored song sits loaded and paused at
+    /// its saved second, so `toggle_play` just resumes. Any failure keeps
+    /// the restored (unloaded) state; Play then takes the normal path.
+    fn finish_prepare(&mut self, pending: &PendingPlayback, load: PlaybackLoad) -> String {
+        let still_restored = self
+            .resume_at
+            .as_ref()
+            .is_some_and(|(id, at)| *id == pending.video_id && *at == pending.start_at);
+        let ok = still_restored
+            && load.error.is_none()
+            && crate::playback::check_playback_gate(&self.gate).is_ok()
+            && load
+                .prepared
+                .is_some_and(|prepared| self.audio.play_prepared(prepared, true).is_ok());
+        if !ok {
+            return "idle".to_string();
+        }
+        self.resume_at = None;
+        if let Some(duration) = load.ticket.as_ref().and_then(|t| t.duration_secs()) {
+            self.duration = duration.min(i32::MAX as u32) as i32;
+        }
+        self.queue.refill(load.refill);
+        // Loaded but paused: the "playing" state with is_playing off is the
+        // same state a user pause leaves, so Play resumes in place.
+        self.playback_state = PlaybackState::Playing.as_str().to_string();
+        self.is_playing = false;
+        self.refresh_queue_view();
         self.emit_playback_props();
         "ok".to_string()
     }
