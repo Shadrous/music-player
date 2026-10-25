@@ -4,7 +4,7 @@ import QtQuick.Layouts
 import spinwave
 
 // Waiting surface for the native sign-in window. Rust starts an ephemeral
-// `spinwave --sign-in` window; the user finishes the Google flow in that window, and
+// WebKitGTK process; the user finishes the Google flow in that window, and
 // this dialog polls until Rust has the cookie header and the live gate probe
 // completes. Cancel kills the child and closes its window.
 M3Dialog {

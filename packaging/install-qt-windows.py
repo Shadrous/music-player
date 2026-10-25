@@ -1,5 +1,4 @@
-"""Install Qt for MSVC (plus QtWebEngine for sign-in) from Qt's online
-repository into argv[1].
+"""Install Qt for MSVC from Qt's online repository into argv[1].
 
 shortcut: replaces install-qt-action, whose aqt 3.3 predates Qt's per-compiler
 repo folders (qt6_6112_msvc2022_64/); switch back once aqt supports them.
@@ -17,9 +16,6 @@ repo = "https://download.qt.io/online/qtsdkrepository/windows_x86"
 desktop = f"{repo}/desktop/qt6_{v}/qt6_{v}_msvc2022_64"
 packages = [
     (desktop, f"qt.qt6.{v}.win64_msvc2022_64"),
-    (desktop, f"qt.qt6.{v}.addons.qtwebchannel.win64_msvc2022_64"),
-    (desktop, f"qt.qt6.{v}.addons.qtpositioning.win64_msvc2022_64"),
-    (f"{repo}/extensions/qtwebengine/{v}/msvc2022_64", f"extensions.qtwebengine.{v}.win64_msvc2022_64"),
 ]
 
 indexes = {}

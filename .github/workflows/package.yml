@@ -20,7 +20,7 @@ jobs:
         id: qt-cache
         with:
           path: C:\Qt
-          key: qt-6.11.2-msvc2022_64-webengine
+          key: qt-6.11.2-msvc2022_64
       - name: Install Qt
         if: steps.qt-cache.outputs.cache-hit != 'true'
         run: python packaging/install-qt-windows.py C:\Qt 6.11.2

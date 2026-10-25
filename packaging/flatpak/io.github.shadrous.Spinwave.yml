@@ -2,9 +2,6 @@ id: io.github.shadrous.Spinwave
 runtime: org.kde.Platform
 runtime-version: '6.11'
 sdk: org.kde.Sdk
-# QtWebEngine for the sign-in window.
-base: io.qt.qtwebengine.BaseApp
-base-version: '6.11'
 sdk-extensions:
   - org.freedesktop.Sdk.Extension.rust-stable
 command: spinwave
@@ -26,8 +23,6 @@ build-options:
     - --share=network
   env:
     CARGO_HOME: /run/build/spinwave/cargo
-cleanup-commands:
-  - /app/cleanup-BaseApp.sh
 modules:
   - name: spinwave
     buildsystem: simple
