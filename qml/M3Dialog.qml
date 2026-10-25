@@ -46,6 +46,9 @@ Dialog {
         color: Theme.surfaceContainerHigh
     }
     Overlay.modal: Rectangle {
+        // Same corners as the window background (main.qml), so the scrim
+        // doesn't paint the transparent corners outside it.
+        radius: Window.window && Window.window.visibility === Window.Maximized ? 0 : 40
         color: Qt.rgba(0, 0, 0, Theme.dark ? 0.6 : 0.32)
     }
     enter: Transition {
