@@ -197,8 +197,10 @@ impl AudioBackend for RodioBackend {
 }
 
 /// In-memory HTTP audio stream: pulls the short-lived URL in small Range
-/// chunks, retaining at most ONE in-flight chunk. Prior bytes are dropped,
-/// never accumulated to disk or memory caches. Implements `Seek` via
+/// chunks. Holds the chunk being decoded plus the NEXT one, fetched in the
+/// background so the audio callback never waits on the network (a blocking
+/// fetch at each chunk boundary was an audible ~0.5 s gap). Prior bytes are
+/// dropped, never accumulated to disk or memory caches. Implements `Seek` via
 /// position updates (+ a single HEAD for `SeekFrom::End` lengths).
 struct HttpAudioStream {
     // The short-lived URL (memory only; never logged — see error mapping).
@@ -209,10 +211,11 @@ struct HttpAudioStream {
     len: Option<u64>,
     chunk: Vec<u8>,
     chunk_start: u64,
+    // Read-ahead of the chunk after `chunk` (its start offset + task).
+    next: Option<(u64, tokio::task::JoinHandle<std::io::Result<Vec<u8>>>)>,
 }
 
-/// Range chunk size per network read. One in-flight chunk only; 256 KiB is
-/// ~16 s of 128 kbps audio, which keeps the decoder ahead without caching.
+/// Range chunk size per network read; 256 KiB is ~16 s of 128 kbps audio.
 const CHUNK_SIZE: u64 = 256 * 1024;
 
 /// Opt-in stderr diagnostics for the live audio path (`SPINWAVE_DEBUG_AUDIO=1`).
@@ -225,7 +228,9 @@ fn debug_audio() -> bool {
 
 impl HttpAudioStream {
     fn new(url: String, user_agent: &str, prefetched: &[u8]) -> Result<Self, PlaybackError> {
-        let rt = tokio::runtime::Builder::new_current_thread()
+        // One worker so read-aheads progress while the decoder is busy.
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
             .enable_all()
             .build()
             .map_err(|_| PlaybackError::Transport)?;
@@ -235,7 +240,7 @@ impl HttpAudioStream {
             .user_agent(user_agent)
             .build()
             .map_err(|_| PlaybackError::Transport)?;
-        Ok(Self {
+        let mut stream = Self {
             url,
             client,
             rt,
@@ -243,50 +248,53 @@ impl HttpAudioStream {
             len: None,
             chunk: prefetched.to_vec(),
             chunk_start: 0,
-        })
+            next: None,
+        };
+        stream.read_ahead();
+        Ok(stream)
     }
 
-    /// Fill the in-flight chunk at `self.pos`, dropping the previous chunk.
-    fn fill(&mut self) -> std::io::Result<()> {
-        let end = self.pos.saturating_add(CHUNK_SIZE).saturating_sub(1);
-        let response = self
-            .rt
-            .block_on(
-                self.client
-                    .get(&self.url)
-                    .header("Range", format!("bytes={}-{}", self.pos, end))
-                    .send(),
-            )
-            .map_err(|_| {
-                if debug_audio() {
-                    eprintln!("audio: stream request failed");
-                }
-                std::io::Error::other("stream read failed")
-            })?;
-        // Static messages only: status/response errors embed the URL.
-        let status = response.status().as_u16();
-        if debug_audio() {
-            eprintln!("audio: stream http {status}");
+    /// Start fetching the chunk after the current one, unless it already
+    /// runs or the current chunk was the file's last (short) one.
+    fn read_ahead(&mut self) {
+        let start = self.chunk_start.saturating_add(self.chunk.len() as u64);
+        if self.chunk.len() < CHUNK_SIZE as usize && !self.chunk.is_empty() && self.chunk_start > 0 {
+            return;
         }
-        super::classify_stream_status(status).map_err(|e| {
-            let kind = match e {
-                PlaybackError::ExpiredUrl => std::io::ErrorKind::PermissionDenied,
-                _ => std::io::ErrorKind::Other,
-            };
-            std::io::Error::new(kind, "stream read failed")
-        })?;
-        let bytes = self
-            .rt
-            .block_on(response.bytes())
-            .map_err(|_| {
-                if debug_audio() {
-                    eprintln!("audio: stream body read failed");
-                }
-                std::io::Error::other("stream read failed")
-            })?;
-        // Drop the previous chunk: at most one in-flight chunk is retained.
-        self.chunk = bytes.to_vec();
+        if self.len.is_some_and(|len| start >= len) || self.next.as_ref().is_some_and(|(s, _)| *s == start) {
+            return;
+        }
+        if let Some((_, stale)) = self.next.take() {
+            stale.abort();
+        }
+        let task = self.rt.spawn(fetch_range(self.client.clone(), self.url.clone(), start));
+        self.next = Some((start, task));
+    }
+
+    /// Make the chunk at `self.pos` current: the finished read-ahead when it
+    /// matches (the normal case), else a direct fetch (after a seek).
+    fn fill(&mut self) -> std::io::Result<()> {
+        let waited = std::time::Instant::now();
+        let ready = match self.next.take() {
+            Some((start, task)) if start == self.pos => self.rt.block_on(task).ok().and_then(Result::ok),
+            Some((_, stale)) => {
+                stale.abort();
+                None
+            }
+            None => None,
+        };
+        // A failed read-ahead gets one direct retry, like before read-ahead.
+        let bytes = match ready {
+            Some(bytes) => bytes,
+            None => self.rt.block_on(fetch_range(self.client.clone(), self.url.clone(), self.pos))?,
+        };
+        if debug_audio() {
+            eprintln!("audio: chunk wait {} ms", waited.elapsed().as_millis());
+        }
+        // Drop the previous chunk; only this one + the read-ahead are held.
+        self.chunk = bytes;
         self.chunk_start = self.pos;
+        self.read_ahead();
         Ok(())
     }
 
@@ -319,6 +327,41 @@ impl HttpAudioStream {
         self.len = Some(len);
         Ok(len)
     }
+}
+
+/// GET one Range chunk starting at `start` (memory only). Static error
+/// messages only: status/response errors would embed the URL.
+async fn fetch_range(client: reqwest::Client, url: String, start: u64) -> std::io::Result<Vec<u8>> {
+    let end = start.saturating_add(CHUNK_SIZE).saturating_sub(1);
+    let response = client
+        .get(&url)
+        .header("Range", format!("bytes={start}-{end}"))
+        .send()
+        .await
+        .map_err(|_| {
+            if debug_audio() {
+                eprintln!("audio: stream request failed");
+            }
+            std::io::Error::other("stream read failed")
+        })?;
+    let status = response.status().as_u16();
+    if debug_audio() {
+        eprintln!("audio: stream http {status}");
+    }
+    super::classify_stream_status(status).map_err(|e| {
+        let kind = match e {
+            PlaybackError::ExpiredUrl => std::io::ErrorKind::PermissionDenied,
+            _ => std::io::ErrorKind::Other,
+        };
+        std::io::Error::new(kind, "stream read failed")
+    })?;
+    let bytes = response.bytes().await.map_err(|_| {
+        if debug_audio() {
+            eprintln!("audio: stream body read failed");
+        }
+        std::io::Error::other("stream read failed")
+    })?;
+    Ok(bytes.to_vec())
 }
 
 impl Read for HttpAudioStream {
@@ -449,6 +492,57 @@ impl AudioBackend for MockBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Serves `data` over plain HTTP with Range support, one request per
+    /// connection; counts requests.
+    fn range_server(data: Vec<u8>) -> (String, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
+        use std::io::Write;
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/a", listener.local_addr().unwrap());
+        let hits = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = hits.clone();
+        std::thread::spawn(move || {
+            for mut conn in listener.incoming().flatten() {
+                counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let mut buf = [0u8; 2048];
+                let n = conn.read(&mut buf).unwrap_or(0);
+                let req = String::from_utf8_lossy(&buf[..n]).to_string();
+                let range = req.lines().find_map(|l| l.strip_prefix("Range: bytes=").or_else(|| l.strip_prefix("range: bytes=")));
+                let (a, b) = range
+                    .and_then(|r| r.split_once('-'))
+                    .map(|(a, b)| (a.trim().parse::<usize>().unwrap(), b.trim().parse::<usize>().unwrap()))
+                    .unwrap_or((0, data.len() - 1));
+                let head = if a >= data.len() {
+                    "HTTP/1.1 416 Range Not Satisfiable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_string()
+                } else {
+                    let b = b.min(data.len() - 1);
+                    format!("HTTP/1.1 206 Partial Content\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", b - a + 1)
+                };
+                let _ = conn.write_all(head.as_bytes());
+                if a < data.len() {
+                    let _ = conn.write_all(&data[a..=b.min(data.len() - 1)]);
+                }
+            }
+        });
+        (url, hits)
+    }
+
+    #[test]
+    fn stream_reads_ahead_across_chunks_and_seeks() {
+        let data: Vec<u8> = (0..700 * 1024).map(|i| (i % 251) as u8).collect();
+        let (url, hits) = range_server(data.clone());
+        let first = &data[..CHUNK_SIZE as usize];
+        let mut stream = HttpAudioStream::new(url, "test-ua", first).unwrap();
+        let mut out = vec![0u8; data.len()];
+        stream.read_exact(&mut out).unwrap();
+        assert!(out == data, "bytes intact across chunk boundaries");
+        // Chunks 2 and 3 came from read-ahead; nothing after the short last one.
+        assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), 2);
+        stream.seek(SeekFrom::Start(300 * 1024)).unwrap();
+        let mut probe = [0u8; 16];
+        stream.read_exact(&mut probe).unwrap();
+        assert_eq!(&probe[..], &data[300 * 1024..300 * 1024 + 16]);
+    }
 
     #[test]
     fn volume_clamps() {
