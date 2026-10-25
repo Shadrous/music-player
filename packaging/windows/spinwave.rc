@@ -1,0 +1,2 @@
+// Qt uses IDI_ICON1 as the default window/taskbar icon on Windows.
+IDI_ICON1 ICON "spinwave.ico"

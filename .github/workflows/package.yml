@@ -16,15 +16,28 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: jurplel/install-qt-action@v4
+      - uses: actions/cache@v4
+        id: qt-cache
         with:
-          version: '6.11.2'
-          arch: win64_msvc2022_64
-          cache: true
+          path: C:\Qt
+          key: qt-6.11.2-msvc2022_64-webengine
+      - name: Install Qt
+        if: steps.qt-cache.outputs.cache-hit != 'true'
+        run: python packaging/install-qt-windows.py C:\Qt 6.11.2
+      - name: Put Qt on PATH
+        shell: bash
+        run: |
+          qmake=$(find /c/Qt -name qmake.exe -path '*/bin/*' | head -1)
+          echo "$(dirname "$qmake")" >> "$GITHUB_PATH"
+          echo "QMAKE=$(cygpath -w "$qmake")" >> "$GITHUB_ENV"
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - uses: ilammy/msvc-dev-cmd@v1
       - name: Build
-        run: cargo build --release --locked
+        shell: bash
+        run: |
+          rc -nologo -fo spinwave.res packaging/windows/spinwave.rc
+          cargo rustc --release --locked --bin spinwave -- -C link-arg=spinwave.res
       - name: Bundle
         shell: bash
         run: |
@@ -52,8 +65,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y flatpak flatpak-builder
           flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-      - name: Available KDE SDKs
-        run: flatpak remote-ls --user flathub --runtime --columns=application,branch | grep -E '^org\.kde\.Sdk\s' || true
       - name: Build
         run: |
           flatpak-builder --user --install-deps-from=flathub --force-clean --repo=repo build \

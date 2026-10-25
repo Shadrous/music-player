@@ -35,11 +35,15 @@ pub struct NowPlaying<'a> {
 }
 
 impl Media {
-    /// Register with the OS; `None` when unavailable (no session bus, ...).
-    /// shortcut: Windows SMTC needs the window's HWND, not passed yet; wire it with the Windows build.
+    /// Register with the OS; `None` when unavailable (no session bus, or on
+    /// Windows no shown window yet: the caller retries).
     #[cfg(not(test))]
     pub fn start() -> Option<Self> {
-        let config = souvlaki::PlatformConfig { display_name: "Spinwave", dbus_name: "spinwave", hwnd: None };
+        #[cfg(windows)]
+        let hwnd = Some(main_window()?);
+        #[cfg(not(windows))]
+        let hwnd = None;
+        let config = souvlaki::PlatformConfig { display_name: "Spinwave", dbus_name: "spinwave", hwnd };
         let mut controls = MediaControls::new(config).ok()?;
         let events = Arc::new(Mutex::new(Vec::new()));
         let sink = Arc::clone(&events);
@@ -89,4 +93,33 @@ impl Media {
         let _ = self.controls.set_playback(playback);
         self.shown = shown;
     }
+}
+
+/// This process's visible top-level window (the Qt main window): Windows
+/// media controls attach to a window.
+#[cfg(all(windows, not(test)))]
+fn main_window() -> Option<*mut std::ffi::c_void> {
+    type Hwnd = *mut std::ffi::c_void;
+    #[link(name = "user32")]
+    extern "system" {
+        fn EnumWindows(visit: extern "system" fn(Hwnd, isize) -> i32, found: isize) -> i32;
+        fn GetWindowThreadProcessId(hwnd: Hwnd, pid: *mut u32) -> u32;
+        fn IsWindowVisible(hwnd: Hwnd) -> i32;
+    }
+    extern "system" fn visit(hwnd: Hwnd, found: isize) -> i32 {
+        let mut pid = 0;
+        // SAFETY: plain Win32 queries on a handle EnumWindows just gave us.
+        let ours = unsafe { GetWindowThreadProcessId(hwnd, &mut pid) } != 0
+            && pid == std::process::id()
+            && unsafe { IsWindowVisible(hwnd) } != 0;
+        if ours {
+            // SAFETY: `found` points at the caller's local below, alive for the call.
+            unsafe { *(found as *mut Hwnd) = hwnd };
+        }
+        i32::from(!ours) // 0 stops the walk
+    }
+    let mut found: Hwnd = std::ptr::null_mut();
+    // SAFETY: `visit` only writes through the pointer we pass, during this call.
+    unsafe { EnumWindows(visit, &mut found as *mut Hwnd as isize) };
+    (!found.is_null()).then_some(found)
 }

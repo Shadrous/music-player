@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="packaging/icon/spinwave.svg" width="112" alt="">
+
 # Spinwave
 
 **A fast, good-looking desktop client for YouTube Music Premium.**<br>
@@ -51,7 +53,7 @@ Linux for now; other platforms are planned.
 - Rust (stable) and **Qt 6.11** with `qmake6` on your `PATH` (bindings via [QtBridge](https://crates.io/crates/qtbridge))
 - ALSA/PipeWire audio (playback uses `rodio`)
 - A Secret Service keyring (GNOME Keyring, KWallet, …)
-- For browser sign-in: `python3-gobject` and `webkit2gtk4.1`. Without them, the app falls back to pasting a cookie header.
+- For browser sign-in: Qt WebEngine (`qt6-qtwebengine` on Fedora). Without it, the app falls back to pasting a cookie header.
 - Fonts: [Material Symbols Rounded](https://fonts.google.com/icons), [Google Sans Flex](https://fonts.google.com/specimen/Google+Sans+Flex) and [Roboto](https://fonts.google.com/specimen/Roboto). Put them in `~/.local/share/fonts/` and run `fc-cache -f`; without them, icons show up as words.
 
 **Build and run**
@@ -76,3 +78,9 @@ cargo clippy --all-targets -- -D warnings
 - `qml/`: thin Qt Quick views and small Material 3 parts (`IconButton`, `PillButton`, `Segmented`, `Toggle`, …). Colors only come from the Rust `Theme`.
 
 Playback uses YouTube's InnerTube player API. Audio is fetched in 256 KiB ranges, held in memory only and decoded by `rodio`.
+
+## License
+
+[MIT](LICENSE). Spinwave uses Qt and qtbridge under the LGPL-3.0; packaged
+builds ship the Roboto and Google Sans Flex fonts (SIL OFL 1.1) and Material
+Symbols (Apache 2.0), with their license texts beside them.

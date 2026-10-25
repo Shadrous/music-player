@@ -17,9 +17,9 @@
 //!
 //! ## Browser sign-in (Sonora-style)
 //!
-//! The primary login path opens an ephemeral WebKitGTK sign-in window through
-//! [`BROWSER_LOGIN_HELPER`] (Python + PyGObject, the same engine Sonora uses
-//! on Linux). The helper polls its own cookie manager and prints the
+//! The primary login path opens an off-the-record QtWebEngine sign-in window
+//! (`spinwave --sign-in`, see `sign_in.rs`; same on every platform). It reads
+//! the site's cookies over the engine's local DevTools port and prints the
 //! `Cookie` request-header value once the `__Secure-3PAPISID` proof cookie is
 //! present, then exits. [`login_from_cookie_header`] normalizes the header,
 //! synthesizes the `browser.json` blob (`ytmusic-rs` regenerates the real
@@ -55,11 +55,6 @@ pub const PROOF_COOKIE: &str = "__Secure-3PAPISID";
 
 /// Origin sent with InnerTube requests and used for the browser-auth hash.
 pub const MUSIC_ORIGIN: &str = "https://music.youtube.com";
-
-/// Ephemeral WebKitGTK sign-in helper (see the file header). It is passed to
-/// `python3 -c`, so no helper file is written to disk and the cookie header
-/// travels only through the child's stdout pipe.
-pub const BROWSER_LOGIN_HELPER: &str = include_str!("../browser_login_helper.py");
 
 /// Auth failures. Never carries secret material — only static text plus
 /// non-sensitive keyring/transport summaries.

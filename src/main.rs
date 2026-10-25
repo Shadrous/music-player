@@ -1,3 +1,6 @@
+// Release builds on Windows are GUI apps (no console window); debug keeps logs.
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
 use qtbridge::{QApp, qobject};
 
 mod auth;
@@ -7,6 +10,7 @@ mod models;
 mod playback;
 mod media_controls;
 mod paths;
+mod sign_in;
 mod prefs;
 mod premium_gate;
 mod theme;
@@ -54,7 +58,7 @@ pub struct Backend {
     is_logged_in: bool,
     gate_status: String,
     gate: crate::premium_gate::PremiumGate,
-    // The optional native sign-in child (WebKitGTK helper). Its stdout pipe
+    // The optional sign-in child (`spinwave --sign-in`). Its stdout pipe
     // carries the cookie header once, directly into memory; never a file.
     browser_login_child: Option<std::process::Child>,
     // Header read from the child, held just long enough for QML to paint a
@@ -1166,6 +1170,10 @@ impl Backend {
     #[qslot]
     fn poll_media_keys(&mut self) {
         use crate::media_controls::{Event, SeekDirection};
+        // Windows attaches to the shown window, which may not exist at restore.
+        if cfg!(windows) && self.media.is_none() {
+            self.media = crate::media_controls::Media::start();
+        }
         let Some(events) = self.media.as_ref().map(|m| m.take_events()) else {
             return;
         };
@@ -1323,21 +1331,21 @@ impl Backend {
         crate::legal::GOOGLE_PRIVACY_URL.to_string()
     }
 
-    /// Start the native sign-in window (ephemeral WebKitGTK helper) and
-    /// return `"started"` or a short user-facing failure. The helper prints
+    /// Start the sign-in window (`spinwave --sign-in`, see `sign_in.rs`) and
+    /// return `"started"` or a short user-facing failure. The child prints
     /// the Cookie header on stdout exactly once; [`Self::poll_browser_signin`]
     /// reads it after exit — no credential file, no shared browser profile.
     #[qslot]
     fn start_browser_signin(&mut self) -> String {
         self.cancel_browser_signin();
-        let python = std::env::var("SPINWAVE_PYTHON").unwrap_or_else(|_| "python3".to_string());
-        let child = std::process::Command::new(&python)
-            .arg("-c")
-            .arg(crate::auth::BROWSER_LOGIN_HELPER)
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn();
+        let child = std::env::current_exe().and_then(|exe| {
+            std::process::Command::new(exe)
+                .arg("--sign-in")
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+        });
         match child {
             Ok(child) => {
                 self.browser_login_child = Some(child);
@@ -2112,6 +2120,10 @@ fn migrate_legacy_dirs() {
 }
 
 fn main() {
+    if std::env::args().nth(1).as_deref() == Some("--sign-in") {
+        let qml_dir = resolve_qml_file().parent().map(plain_path).unwrap_or_default();
+        std::process::exit(sign_in::run(&qml_dir));
+    }
     migrate_legacy_dirs();
     // Low-performance mode: Qt's software renderer instead of the GPU. Must
     // be set before Qt starts, hence "from the next launch". An explicit
