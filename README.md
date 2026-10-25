@@ -16,6 +16,7 @@ Rust under the hood, a Qt Quick UI in Material 3 Expressive on top.
 - **Picks up where you left off.** Close the app mid-song and it reopens on the same queue, paused at the same second. Both behaviours can be switched off in Settings.
 - **Handles big playlists.** Playlists load page by page as you scroll, and the list is virtualized, so even a fully loaded playlist with thousands of songs only draws the rows on screen.
 - **Better search.** Merges the signed-in and guest Songs results, then ranks by how well the title matches and by play count. So "Hello" finds Adele first.
+- **Lyrics.** Tap the mic button and the art pane turns into the song's lyrics over a blurred, tinted cover, whenever YouTube Music has them.
 - **Your YouTube likes.** Hearts come from your Liked Music, and liking a song here likes it on YouTube Music too.
 - **Low-performance mode.** One switch in Settings turns off animations and next-song preloading, and draws without the graphics card, for older or busy machines.
 - **Queue that makes sense.** Playing a row queues the list around it. Shuffle, repeat one/all, radio and autoplay of similar songs are all there, and the next track is prefetched so Next is instant.

@@ -28,7 +28,8 @@ Item {
 
     Rectangle {
         anchors.fill: parent
-        radius: row.isCurrent ? 20 : 16
+        // Card radius (28) minus its 8px inset.
+        radius: 20
         color: row.isCurrent ? Theme.secondaryContainer : "transparent"
         Behavior on color { enabled: !Backend.lowPerformance; ColorAnimation { duration: 200 } }
         Rectangle {

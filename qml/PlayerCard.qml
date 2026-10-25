@@ -10,7 +10,9 @@ import spinwave
 Rectangle {
     id: card
     property bool queueOpen: false
+    property bool lyricsOn: false
     signal toggleQueue()
+    signal toggleLyrics()
     signal requestUpgrade()
 
     implicitHeight: column.implicitHeight + 26
@@ -66,7 +68,7 @@ Rectangle {
                         x: -14; y: 14; width: 60; height: 60
                         visible: !thumb.ready
                         fillColor: Theme.secondaryContainer
-                        spinning: Backend.isPlaying
+                        spinning: Backend.isPlaying && !Backend.lowPerformance
                     }
                     Rectangle {
                         x: 36; y: 4; width: 28; height: 28; radius: 14
@@ -177,6 +179,14 @@ Rectangle {
                     toggle: true
                     checked: Backend.loopMode !== "off"
                     onClicked: Backend.cycleLoop()
+                }
+                IconButton {
+                    icon: "mic"
+                    label: card.lyricsOn ? qsTr("Hide lyrics") : qsTr("Show lyrics")
+                    iconSize: 22
+                    toggle: true
+                    checked: card.lyricsOn
+                    onClicked: card.toggleLyrics()
                 }
             }
 

@@ -22,6 +22,8 @@ ApplicationWindow {
     // The app draws its own title bar (window controls next to search).
     flags: Qt.Window | Qt.FramelessWindowHint
     readonly property bool maximized: visibility === Window.Maximized
+    // Lyrics replace the cover art pane (mic button on the player).
+    property bool lyricsOn: false
 
     // Fusion controls (dialogs, busy indicators) follow the M3 palette.
     palette.window: Theme.surfaceContainerHigh
@@ -66,7 +68,8 @@ ApplicationWindow {
 
     Rectangle {
         anchors.fill: parent
-        radius: root.maximized ? 0 : 16
+        // Concentric with the 28px panels 12px inside (28 + 12).
+        radius: root.maximized ? 0 : 40
         color: Theme.surface
     }
 
@@ -104,6 +107,7 @@ ApplicationWindow {
         CoverPanel {
             Layout.preferredWidth: 360
             Layout.fillHeight: true
+            lyricsOn: root.lyricsOn
         }
 
         ColumnLayout {
@@ -233,6 +237,8 @@ ApplicationWindow {
 
             PlayerCard {
                 Layout.fillWidth: true
+                lyricsOn: root.lyricsOn
+                onToggleLyrics: root.lyricsOn = !root.lyricsOn
                 queueOpen: contentHost.view === 0 && home.showQueue
                 onToggleQueue: {
                     home.showQueue = !queueOpen;

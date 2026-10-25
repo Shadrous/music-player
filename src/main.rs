@@ -17,7 +17,7 @@ use playback::backend::{AudioBackend, RodioBackend};
 use playback::player::PlaybackSnapshot;
 use playback::queue::{Queue, QueueItem};
 
-/// Mini-player state (v3, human-approved). Thin: QML binds layout only;
+/// Player + session state for the QML shell. Thin: QML binds layout only;
 /// all decisions live here in pure helpers + slot mutations.
 pub struct Backend {
     is_playing: bool,
@@ -1573,6 +1573,13 @@ impl Backend {
     #[qslot]
     fn playlist_rows_json(&self, playlist_id: String) -> String {
         crate::ytmusic::library::playlist_rows_json(&playlist_id)
+    }
+
+    /// Lyrics for `video_id` (see `ytmusic::lyrics`): JSON, or "" while
+    /// loading (QML polls). Metadata only.
+    #[qslot]
+    fn lyrics_json(&self, video_id: String) -> String {
+        crate::ytmusic::lyrics::lyrics_json(&video_id, &self.gate_status)
     }
 
     /// Whether the open playlist has another page (load on scroll).

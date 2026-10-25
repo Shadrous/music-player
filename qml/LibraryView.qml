@@ -313,7 +313,7 @@ Item {
                             Layout.fillWidth: true
                             Layout.preferredWidth: 240
                             implicitHeight: 84
-                            radius: 20
+                            radius: 26 // art (16) + 10 inset: concentric
                             color: Theme.surfaceContainer
                             Rectangle {
                                 anchors.fill: parent

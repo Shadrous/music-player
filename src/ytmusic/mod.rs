@@ -17,6 +17,7 @@
 
 pub mod home;
 pub mod library;
+pub mod lyrics;
 pub mod search;
 
 use crate::premium_gate::{GateStatus, PremiumGate};

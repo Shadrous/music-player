@@ -52,7 +52,7 @@ ColumnLayout {
                 Layout.fillWidth: true
                 Layout.preferredWidth: 200
                 implicitHeight: 76
-                radius: 20
+                radius: 24 // art (14) + 10 inset: concentric
                 color: Theme.surfaceContainer
                 Rectangle {
                     anchors.fill: parent
