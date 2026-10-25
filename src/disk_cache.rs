@@ -8,10 +8,7 @@ use serde_json::Value;
 
 #[cfg(not(test))]
 fn dir() -> Option<std::path::PathBuf> {
-    let base = std::env::var_os("XDG_CACHE_HOME")
-        .map(std::path::PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".cache")))?;
-    Some(base.join("spinwave"))
+    Some(crate::paths::cache_home()?.join("spinwave"))
 }
 
 /// File-safe name: ids come from YouTube, keep only `[A-Za-z0-9_-]`.
@@ -38,16 +35,21 @@ pub fn read(_name: &str) -> Option<Value> {
 #[cfg(not(test))]
 pub fn write(name: &str, value: &Value) {
     use std::io::Write;
-    use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
     let Some(dir) = dir() else { return };
-    let _ = std::fs::DirBuilder::new().recursive(true).mode(0o700).create(&dir);
+    let mut dirs = std::fs::DirBuilder::new();
+    let mut file = std::fs::OpenOptions::new();
+    file.write(true).create(true).truncate(true);
+    // Owner-only on Unix; Windows profile folders are per-user already.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+        dirs.mode(0o700);
+        file.mode(0o600);
+    }
+    let _ = dirs.recursive(true).create(&dir);
     let path = dir.join(file_name(name));
     let tmp = path.with_extension("json.tmp");
-    let written = std::fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o600)
+    let written = file
         .open(&tmp)
         .and_then(|mut f| f.write_all(value.to_string().as_bytes()));
     if written.is_ok() {

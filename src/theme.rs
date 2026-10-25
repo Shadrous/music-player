@@ -73,10 +73,7 @@ pub fn palette(seed: &str, dark: bool) -> &'static Row {
 /// Saved choice: `~/.config/spinwave/theme` holding "<seed> <dark|light>".
 #[cfg(not(test))]
 fn theme_file() -> Option<std::path::PathBuf> {
-    let base = std::env::var_os("XDG_CONFIG_HOME")
-        .map(std::path::PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".config")))?;
-    Some(base.join("spinwave").join("theme"))
+    Some(crate::paths::config_home()?.join("spinwave").join("theme"))
 }
 
 /// Parse a saved choice; `None` for anything unexpected (defaults win).

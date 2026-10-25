@@ -1,0 +1,42 @@
+id: io.github.shadrous.Spinwave
+runtime: org.kde.Platform
+runtime-version: '6.10'
+sdk: org.kde.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+command: spinwave
+finish-args:
+  - --share=ipc
+  - --share=network
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  - --socket=pulseaudio
+  # Session cookie lives in the desktop keyring (Secret Service).
+  - --talk-name=org.freedesktop.secrets
+  # OS media controls (GNOME media panel, media keys).
+  - --own-name=org.mpris.MediaPlayer2.spinwave
+build-options:
+  append-path: /usr/lib/sdk/rust-stable/bin
+  # shortcut: network during the build (cargo crates + fonts); a Flathub submission needs vendored cargo sources instead.
+  build-args:
+    - --share=network
+  env:
+    CARGO_HOME: /run/build/spinwave/cargo
+modules:
+  - name: spinwave
+    buildsystem: simple
+    build-commands:
+      - cargo build --release --locked
+      - install -Dm755 target/release/spinwave /app/bin/spinwave
+      - mkdir -p /app/share/spinwave && cp -r qml /app/share/spinwave/qml
+      - bash packaging/fetch-fonts.sh /app/share/spinwave/fonts
+      - install -Dm644 packaging/linux/io.github.shadrous.Spinwave.desktop -t /app/share/applications
+      - install -Dm644 packaging/linux/io.github.shadrous.Spinwave.metainfo.xml -t /app/share/metainfo
+      - install -Dm644 packaging/icon/spinwave.svg /app/share/icons/hicolor/scalable/apps/io.github.shadrous.Spinwave.svg
+    sources:
+      - type: dir
+        path: ../..
+        skip:
+          - target
+          - .git

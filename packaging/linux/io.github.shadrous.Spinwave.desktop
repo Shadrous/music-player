@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Spinwave
+Comment=Desktop client for YouTube Music Premium
+Exec=spinwave
+Icon=io.github.shadrous.Spinwave
+Categories=AudioVideo;Audio;Player;
+Terminal=false
+StartupWMClass=spinwave

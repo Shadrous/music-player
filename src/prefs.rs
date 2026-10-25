@@ -34,10 +34,7 @@ impl Prefs {
 
 #[cfg(not(test))]
 fn path() -> Option<std::path::PathBuf> {
-    let base = std::env::var_os("XDG_CONFIG_HOME")
-        .map(std::path::PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".config")))?;
-    Some(base.join("spinwave").join("prefs.json"))
+    Some(crate::paths::config_home()?.join("spinwave").join("prefs.json"))
 }
 
 #[cfg(not(test))]

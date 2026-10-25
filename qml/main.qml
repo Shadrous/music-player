@@ -67,6 +67,15 @@ ApplicationWindow {
         onTriggered: Backend.pollPlayback()
     }
 
+    // Packaged builds ship their fonts beside the QML (none on a dev checkout).
+    Instantiator {
+        model: JSON.parse(Backend.bundledFontsJson())
+        delegate: FontLoader {
+            required property string modelData
+            source: modelData
+        }
+    }
+
     UpgradeDialog { id: upgradeDialog }
     CookieLoginDialog { id: cookieLogin }
     BrowserLoginDialog {

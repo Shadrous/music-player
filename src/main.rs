@@ -6,6 +6,7 @@ mod legal;
 mod models;
 mod playback;
 mod media_controls;
+mod paths;
 mod prefs;
 mod premium_gate;
 mod theme;
@@ -1719,6 +1720,26 @@ impl Backend {
         crate::ytmusic::lyrics::lyrics_json(&video_id, &self.gate_status)
     }
 
+    /// `file://` URLs of fonts shipped beside the QML (`../fonts/*.ttf` in
+    /// packages); empty on a dev checkout, which uses installed fonts.
+    #[qslot]
+    fn bundled_fonts_json(&self) -> String {
+        let fonts = resolve_qml_file()
+            .parent()
+            .and_then(|qml| qml.parent())
+            .map(|root| root.join("fonts"));
+        let urls: Vec<String> = fonts
+            .and_then(|dir| std::fs::read_dir(dir).ok())
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|entry| entry.path())
+            .filter(|path| path.extension().is_some_and(|ext| ext == "ttf"))
+            .map(|path| file_url(&path))
+            .collect();
+        serde_json::to_string(&urls).unwrap_or_default()
+    }
+
     /// Whether the open playlist has another page (load on scroll).
     #[qslot]
     fn playlist_has_more(&self, playlist_id: String) -> bool {
@@ -2021,6 +2042,24 @@ fn resolve_qml_file() -> std::path::PathBuf {
     }
 }
 
+/// Path as plain text, without Windows' `\\?\` verbatim prefix (which
+/// `canonicalize` adds and Qt doesn't understand).
+fn plain_path(path: &std::path::Path) -> String {
+    let text = path.to_string_lossy();
+    text.strip_prefix(r"\\?\").unwrap_or(&text).to_string()
+}
+
+/// `file://` URL for a local path on Linux (`/a` -> `file:///a`) and
+/// Windows (`C:\a` -> `file:///C:/a`).
+fn file_url(path: &std::path::Path) -> String {
+    let text = plain_path(path).replace('\\', "/");
+    if text.starts_with('/') {
+        format!("file://{text}")
+    } else {
+        format!("file:///{text}")
+    }
+}
+
 /// Pure core of [`resolve_qml_file`]: first existing candidate wins, else a
 /// `Result::Err` naming every searched path. Takes its inputs as parameters
 /// (instead of reading env/process state) so unit tests run with temp dirs
@@ -2036,6 +2075,8 @@ fn find_qml_file(
     }
     if let Some(exe) = exe_dir {
         searched.push(exe.join("qml/main.qml"));
+        // Flatpak / Linux install: bin/spinwave + share/spinwave/qml.
+        searched.push(exe.join("../share/spinwave/qml/main.qml"));
         searched.push(exe.join("../qml/main.qml"));
         searched.push(exe.join("../../qml/main.qml"));
     }
@@ -2062,16 +2103,10 @@ Set ${QML_DIR_ENV_VAR} to the qml/ directory or run an installed binary."
 /// One-time move of `~/.config/music-player` / `~/.cache/music-player`
 /// (pre-rename) to the `spinwave` names, keeping theme, prefs and cache.
 fn migrate_legacy_dirs() {
-    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
-    for (var, fallback) in [("XDG_CONFIG_HOME", ".config"), ("XDG_CACHE_HOME", ".cache")] {
-        let base = std::env::var_os(var)
-            .map(std::path::PathBuf::from)
-            .or_else(|| home.as_ref().map(|h| h.join(fallback)));
-        if let Some(base) = base {
-            let (old, new) = (base.join("music-player"), base.join("spinwave"));
-            if old.is_dir() && !new.exists() {
-                let _ = std::fs::rename(old, new);
-            }
+    for base in [crate::paths::config_home(), crate::paths::cache_home()].into_iter().flatten() {
+        let (old, new) = (base.join("music-player"), base.join("spinwave"));
+        if old.is_dir() && !new.exists() {
+            let _ = std::fs::rename(old, new);
         }
     }
 }
@@ -2092,11 +2127,8 @@ fn main() {
     // path so SIBLING components (Sidebar, CoverPanel, PlayerCard, …)
     // resolve from the same directory.
     let qml_file = resolve_qml_file();
-    let qml_dir = qml_file
-        .parent()
-        .map(|d| d.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    let qml_url = format!("file://{}", qml_file.display());
+    let qml_dir = qml_file.parent().map(plain_path).unwrap_or_default();
+    let qml_url = file_url(&qml_file);
     // Singleton backends (Backend, Theme) auto-register via LinkMe (see
     // qtbridge QML_REGISTER_CALLBACKS); list models register explicitly.
     QApp::new()
@@ -2144,6 +2176,14 @@ mod tests {
         assert_eq!(b.playback_session_json().unwrap()["position"], 0);
         b.resume_enabled = false;
         assert!(b.playback_session_json().is_none());
+    }
+
+    #[test]
+    fn file_urls_work_for_linux_and_windows_paths() {
+        use std::path::Path;
+        assert_eq!(super::file_url(Path::new("/opt/x/main.qml")), "file:///opt/x/main.qml");
+        assert_eq!(super::file_url(Path::new(r"\\?\C:\Spinwave\qml\main.qml")), "file:///C:/Spinwave/qml/main.qml");
+        assert_eq!(super::plain_path(Path::new(r"\\?\C:\a")), r"C:\a");
     }
 
     #[test]
