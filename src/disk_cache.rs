@@ -1,4 +1,4 @@
-//! Small metadata-only JSON cache in `~/.cache/music-player/` (or
+//! Small metadata-only JSON cache in `~/.cache/spinwave/` (or
 //! `$XDG_CACHE_HOME`): home/library/playlist rows (titles, video ids,
 //! thumbnail links) and the last gate result. Never media, stream URLs,
 //! cookies or tokens. Best-effort: any I/O or parse error reads as a miss.
@@ -11,7 +11,7 @@ fn dir() -> Option<std::path::PathBuf> {
     let base = std::env::var_os("XDG_CACHE_HOME")
         .map(std::path::PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".cache")))?;
-    Some(base.join("music-player"))
+    Some(base.join("spinwave"))
 }
 
 /// File-safe name: ids come from YouTube, keep only `[A-Za-z0-9_-]`.

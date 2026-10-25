@@ -1,5 +1,5 @@
 import QtQuick
-import music_player
+import spinwave
 
 // Three bouncing equalizer bars (4px ↔ 16px), frozen when not `running`.
 Row {

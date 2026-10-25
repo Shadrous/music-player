@@ -1,7 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import music_player
+import spinwave
 
 // M3 dialog shell: optional icon + headline, themed surface and scrim, no
 // Fusion title bar or stock buttons. Content goes in `contentItem`; actions
@@ -49,10 +49,12 @@ Dialog {
         color: Qt.rgba(0, 0, 0, Theme.dark ? 0.6 : 0.32)
     }
     enter: Transition {
+        enabled: !Backend.lowPerformance
         NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 150 }
         NumberAnimation { property: "scale"; from: 0.94; to: 1; duration: 250; easing.type: Easing.OutBack }
     }
     exit: Transition {
+        enabled: !Backend.lowPerformance
         NumberAnimation { property: "opacity"; from: 1; to: 0; duration: 120 }
     }
 }

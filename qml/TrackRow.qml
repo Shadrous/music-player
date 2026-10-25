@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Layouts
-import music_player
+import spinwave
 
 // Song row (min 56px): number or equalizer, title + artist/album, liked
 // heart, duration. The current track (matched by video id) sits on a
@@ -30,13 +30,13 @@ Item {
         anchors.fill: parent
         radius: row.isCurrent ? 20 : 16
         color: row.isCurrent ? Theme.secondaryContainer : "transparent"
-        Behavior on color { ColorAnimation { duration: 200 } }
+        Behavior on color { enabled: !Backend.lowPerformance; ColorAnimation { duration: 200 } }
         Rectangle {
             anchors.fill: parent
             radius: parent.radius
             color: row.isCurrent ? Theme.onSecondaryContainer : Theme.onSurface
             opacity: area.pressed ? 0.12 : area.containsMouse ? 0.08 : 0
-            Behavior on opacity { NumberAnimation { duration: 200 } }
+            Behavior on opacity { enabled: !Backend.lowPerformance; NumberAnimation { duration: 200 } }
         }
     }
 
@@ -60,7 +60,7 @@ Item {
             EqBars {
                 anchors.centerIn: parent
                 visible: row.isCurrent
-                running: Backend.isPlaying
+                running: Backend.isPlaying && !Backend.lowPerformance
             }
             Text {
                 anchors.centerIn: parent

@@ -2,7 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Shapes
-import music_player
+import spinwave
 
 // Docked player: now-playing + like | shuffle, prev, play, next, repeat |
 // volume + up-next toggle, then a wavy progress lane that seeks on click.
@@ -156,7 +156,7 @@ Rectangle {
                     bg: Theme.primary
                     fg: Theme.onPrimary
                     enabled: !card.loading && Backend.videoId.length > 0
-                    Behavior on implicitWidth { NumberAnimation { duration: 300; easing.type: Easing.OutBack } }
+                    Behavior on implicitWidth { enabled: !Backend.lowPerformance; NumberAnimation { duration: 300; easing.type: Easing.OutBack } }
                     onClicked: Backend.togglePlay()
                 }
                 IconButton {
@@ -292,7 +292,7 @@ Rectangle {
                             from: -24; to: 0
                             duration: 1100
                             loops: Animation.Infinite
-                            running: Backend.isPlaying
+                            running: Backend.isPlaying && !Backend.lowPerformance
                         }
                     }
                 }

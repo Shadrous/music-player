@@ -114,7 +114,7 @@
 //!
 //! ## Shape dump (evidence path)
 //!
-//! Env-gated flag [`SHAPE_DUMP_ENV`] (`MUSIC_PLAYER_DUMP_SHAPE=1`) makes the
+//! Env-gated flag [`SHAPE_DUMP_ENV`] (`SPINWAVE_DUMP_SHAPE=1`) makes the
 //! live probe print skeletons of the `browse` home + explore responses via
 //! [`dump_shape`] (renderer type names + key names, PLUS short human-label
 //! values for `title` / `text` / `label` / `subtitle` / `simpleText` AND short
@@ -143,7 +143,7 @@
 //! ## Human paste-back needed
 //!
 //! 1. Sign in with the in-app browser window (or the cookie fallback), then
-//!    run the binary with `MUSIC_PLAYER_DUMP_SHAPE=1` and paste back the FULL
+//!    run the binary with `SPINWAVE_DUMP_SHAPE=1` and paste back the FULL
 //!    stderr skeleton lines (`shape home: ...` + `shape explore: ...` +
 //!    `audio: ...` + `topbar_shape: ...` + `altclient: ...`).
 //! 2. Which account tier the run used (Premium vs free) + the one-line probe
@@ -190,7 +190,7 @@ pub const EXPLORE_BROWSE_ID: &str = "FEmusic_explore";
 /// Env flag enabling the redacted shape-dump evidence path: when set to `1`,
 /// the live probe prints KEYS-ONLY skeletons of the home + explore `browse`
 /// responses via [`dump_shape`] (see module docs for the paste-back).
-pub const SHAPE_DUMP_ENV: &str = "MUSIC_PLAYER_DUMP_SHAPE";
+pub const SHAPE_DUMP_ENV: &str = "SPINWAVE_DUMP_SHAPE";
 
 /// Upper bound for the whole live probe (fail-closed on timeout).
 pub const PROBE_TIMEOUT: Duration = Duration::from_secs(30);
@@ -1165,7 +1165,7 @@ fn escape_dump_label(value: &str) -> String {
 }
 
 /// True when the redacted shape-dump evidence path is enabled
-/// (`MUSIC_PLAYER_DUMP_SHAPE=1`).
+/// (`SPINWAVE_DUMP_SHAPE=1`).
 pub fn shape_dump_enabled() -> bool {
     std::env::var(SHAPE_DUMP_ENV).as_deref() == Ok("1")
 }
@@ -1770,7 +1770,7 @@ pub struct ProbeReport {
     pub upgrade_message: Option<String>,
     /// Deep-label evidence: short human labels from home + explore +
     /// account menu (denylist-filtered, ≤80 chars each, sorted, capped).
-    /// Printed on the `MUSIC_PLAYER_DUMP_SHAPE=1` path as `label_hits`.
+    /// Printed on the `SPINWAVE_DUMP_SHAPE=1` path as `label_hits`.
     #[serde(default)]
     pub label_hits: Vec<String>,
 }
@@ -1816,7 +1816,7 @@ impl ProbeReport {
     /// so `badge=unknown` no longer reads as failure when another leg
     /// carries Premium. The demoted `ads` leg is shown as evidence only
     /// (never `via=ads`). Label hits are account content (names, playlist
-    /// titles), so they print only on the `MUSIC_PLAYER_DUMP_SHAPE=1` path.
+    /// titles), so they print only on the `SPINWAVE_DUMP_SHAPE=1` path.
     pub fn render(&self) -> String {
         let mut out = format!(
             "gate={:?} via={} logged_in={} home_ok={} badge={} explore={} topbar={} audio={} ads={} playability={:?}",

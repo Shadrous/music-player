@@ -215,10 +215,10 @@ struct HttpAudioStream {
 /// ~16 s of 128 kbps audio, which keeps the decoder ahead without caching.
 const CHUNK_SIZE: u64 = 256 * 1024;
 
-/// Opt-in stderr diagnostics for the live audio path (`MUSIC_PLAYER_DEBUG_AUDIO=1`).
+/// Opt-in stderr diagnostics for the live audio path (`SPINWAVE_DEBUG_AUDIO=1`).
 /// Static status lines only — never a URL, token, or media byte.
 fn debug_audio() -> bool {
-    std::env::var("MUSIC_PLAYER_DEBUG_AUDIO")
+    std::env::var("SPINWAVE_DEBUG_AUDIO")
         .map(|v| v == "1")
         .unwrap_or(false)
 }

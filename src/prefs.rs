@@ -1,4 +1,4 @@
-//! User preferences in `~/.config/music-player/prefs.json` (or
+//! User preferences in `~/.config/spinwave/prefs.json` (or
 //! `$XDG_CONFIG_HOME`): small booleans the Settings page toggles. Missing or
 //! malformed files fall back to the defaults. Disabled under `cfg(test)`.
 
@@ -9,11 +9,14 @@ pub struct Prefs {
     pub resume: bool,
     /// Resume mid-song at the saved position (else from the song's start).
     pub resume_position: bool,
+    /// Slimmest overhead: no animations, software rendering (from the next
+    /// launch), no next-track prefetch.
+    pub low_performance: bool,
 }
 
 impl Default for Prefs {
     fn default() -> Self {
-        Self { resume: true, resume_position: true }
+        Self { resume: true, resume_position: true, low_performance: false }
     }
 }
 
@@ -24,6 +27,7 @@ impl Prefs {
         Self {
             resume: flag("resume", d.resume),
             resume_position: flag("resumePosition", d.resume_position),
+            low_performance: flag("lowPerformance", d.low_performance),
         }
     }
 }
@@ -33,7 +37,7 @@ fn path() -> Option<std::path::PathBuf> {
     let base = std::env::var_os("XDG_CONFIG_HOME")
         .map(std::path::PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".config")))?;
-    Some(base.join("music-player").join("prefs.json"))
+    Some(base.join("spinwave").join("prefs.json"))
 }
 
 #[cfg(not(test))]
@@ -57,7 +61,11 @@ pub fn save(prefs: Prefs) {
     if let Some(dir) = path.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
-    let json = serde_json::json!({ "resume": prefs.resume, "resumePosition": prefs.resume_position });
+    let json = serde_json::json!({
+        "resume": prefs.resume,
+        "resumePosition": prefs.resume_position,
+        "lowPerformance": prefs.low_performance,
+    });
     let _ = std::fs::write(path, json.to_string());
 }
 
@@ -71,7 +79,8 @@ mod tests {
     #[test]
     fn missing_keys_keep_defaults() {
         let p = Prefs::from_json(&serde_json::json!({ "resumePosition": false }));
-        assert_eq!(p, Prefs { resume: true, resume_position: false });
+        assert_eq!(p, Prefs { resume_position: false, ..Prefs::default() });
+        assert!(Prefs::from_json(&serde_json::json!({ "lowPerformance": true })).low_performance);
         assert_eq!(Prefs::from_json(&serde_json::json!(null)), Prefs::default());
     }
 }

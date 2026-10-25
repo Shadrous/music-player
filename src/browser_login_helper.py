@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Ephemeral WebKitGTK sign-in window for the music player.
+"""Ephemeral WebKitGTK sign-in window for Spinwave.
 
 The app starts this helper for the "Continue with browser" action. It opens
 Google's YouTube Music sign-in flow in a throwaway WebKitGTK data store, polls
@@ -34,7 +34,7 @@ SIGN_IN_URL = (
 LANDING = "https://music.youtube.com/"
 PROOF = "__Secure-3PAPISID"
 # Short diagnostics only; never cookie values.
-DEBUG = os.environ.get("MUSIC_PLAYER_LOGIN_DEBUG") == "1"
+DEBUG = os.environ.get("SPINWAVE_LOGIN_DEBUG") == "1"
 # WebKitGTK's default agent claims Safari; Google answers it with a browser
 # warning. Firefox is a browser Google accepts, and Sonora uses the same one.
 USER_AGENT = (

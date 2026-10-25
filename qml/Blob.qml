@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Shapes
-import music_player
+import spinwave
 
 // Rounded M3 "cookie" shape (design `blob(n, amp, base)` on a 100x100 box),
 // optionally spinning. Decorative only.

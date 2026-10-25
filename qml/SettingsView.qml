@@ -1,7 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import music_player
+import spinwave
 
 // Settings: account (sign-in state + actions), playback resume, and
 // appearance (light/dark + color seed, saved by the Rust Theme singleton).
@@ -140,6 +140,13 @@ ScrollView {
                     checked: Backend.resumePosition
                     onToggled: Backend.setResumePosition(!Backend.resumePosition)
                 }
+                Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: Theme.outlineVariant }
+                SettingRow {
+                    title: qsTr("Low-performance mode")
+                    hint: qsTr("For older or busy computers: turns off animations and next-song preloading, and draws without the graphics card (restart to apply that part)")
+                    checked: Backend.lowPerformance
+                    onToggled: Backend.setLowPerformance(!Backend.lowPerformance)
+                }
             }
         }
 
@@ -225,7 +232,7 @@ ScrollView {
                                     color: swatch.modelData.hex
                                     border.width: swatch.on ? 3 : 0
                                     border.color: Theme.onSurface
-                                    Behavior on radius { NumberAnimation { duration: 300; easing.type: Easing.OutBack } }
+                                    Behavior on radius { enabled: !Backend.lowPerformance; NumberAnimation { duration: 300; easing.type: Easing.OutBack } }
                                     Icon {
                                         anchors.centerIn: parent
                                         visible: swatch.on

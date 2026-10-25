@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Layouts
-import music_player
+import spinwave
 
 // 80px navigation rail: brand mark, destinations, account avatar. Layout
 // only: emits navigate()/openLogin(); session state comes from Backend.
@@ -52,7 +52,7 @@ Item {
                     anchors.horizontalCenter: parent.horizontalCenter
                     width: 56; height: 32; radius: 16
                     color: dest.on ? Theme.secondaryContainer : "transparent"
-                    Behavior on color { ColorAnimation { duration: 200 } }
+                    Behavior on color { enabled: !Backend.lowPerformance; ColorAnimation { duration: 200 } }
                     Rectangle {
                         anchors.fill: parent
                         radius: 16
@@ -103,7 +103,7 @@ Item {
             width: 40; height: 40
             radius: avatarArea.pressed ? 8 : 20
             color: Backend.isLoggedIn ? Theme.tertiaryContainer : Theme.surfaceContainerHighest
-            Behavior on radius { NumberAnimation { duration: 300; easing.type: Easing.OutBack } }
+            Behavior on radius { enabled: !Backend.lowPerformance; NumberAnimation { duration: 300; easing.type: Easing.OutBack } }
             Text {
                 anchors.centerIn: parent
                 visible: Backend.isLoggedIn && Backend.accountName.length > 0

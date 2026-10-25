@@ -1,7 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import music_player
+import spinwave
 
 // Shell: 80px nav rail | 360px art pane | content column (search, the
 // persistent Home/Library views, docked player). Navigation + dialog
@@ -14,7 +14,7 @@ ApplicationWindow {
     height: 800
     minimumWidth: 1100
     minimumHeight: 720
-    title: Backend.title.length > 0 ? Backend.title + " · " + qsTr("Music Player") : qsTr("Music Player")
+    title: Backend.title.length > 0 ? Backend.title + " · " + qsTr("Spinwave") : qsTr("Spinwave")
     color: Theme.surface
     font.family: "Roboto"
     // The app draws its own title bar (window controls next to search).

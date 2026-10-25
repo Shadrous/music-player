@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Layouts
-import music_player
+import spinwave
 
 // Account card body for Settings: avatar, name + Premium status, and the
 // one relevant action (browser sign-in with a cookie fallback, or sign

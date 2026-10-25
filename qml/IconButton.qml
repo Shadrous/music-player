@@ -1,5 +1,5 @@
 import QtQuick
-import music_player
+import spinwave
 
 // Round icon button with an M3 state layer. `toggle` buttons morph to a
 // 12px-radius secondary-container square when `checked` (design `toggle()`);
@@ -22,15 +22,15 @@ Rectangle {
     radius: area.pressed ? 8 : restRadius
     color: bg
     opacity: enabled ? 1 : 0.38
-    Behavior on radius { NumberAnimation { duration: 300; easing.type: Easing.OutBack } }
-    Behavior on color { ColorAnimation { duration: 200 } }
+    Behavior on radius { enabled: !Backend.lowPerformance; NumberAnimation { duration: 300; easing.type: Easing.OutBack } }
+    Behavior on color { enabled: !Backend.lowPerformance; ColorAnimation { duration: 200 } }
 
     Rectangle {
         anchors.fill: parent
         radius: parent.radius
         color: button.fg
         opacity: area.pressed ? 0.12 : area.containsMouse ? 0.08 : 0
-        Behavior on opacity { NumberAnimation { duration: 200 } }
+        Behavior on opacity { enabled: !Backend.lowPerformance; NumberAnimation { duration: 200 } }
     }
     Icon {
         anchors.centerIn: parent

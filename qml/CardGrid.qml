@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Layouts
-import music_player
+import spinwave
 
 // Titled grid of compact cards (min 200px columns) over an AlbumModel or
 // ArtistModel: art tile (or a blob fallback), title, meta line. Hidden when

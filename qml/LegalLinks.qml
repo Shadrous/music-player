@@ -1,5 +1,5 @@
 import QtQuick
-import music_player
+import spinwave
 
 // "YouTube Terms of Service · Privacy Policy" footer (URLs from Rust).
 Text {

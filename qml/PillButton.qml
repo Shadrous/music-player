@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Layouts
-import music_player
+import spinwave
 
 // Icon + label pill (Play / Shuffle / Start radio / Upgrade). `outlined`
 // draws the outline-variant border on a transparent fill.
@@ -23,15 +23,15 @@ Rectangle {
     border.width: outlined ? 1 : 0
     border.color: Theme.outlineVariant
     opacity: enabled ? 1 : 0.38
-    Behavior on radius { NumberAnimation { duration: 300; easing.type: Easing.OutBack } }
-    Behavior on color { ColorAnimation { duration: 200 } }
+    Behavior on radius { enabled: !Backend.lowPerformance; NumberAnimation { duration: 300; easing.type: Easing.OutBack } }
+    Behavior on color { enabled: !Backend.lowPerformance; ColorAnimation { duration: 200 } }
 
     Rectangle {
         anchors.fill: parent
         radius: parent.radius
         color: pill.fg
         opacity: area.pressed ? 0.12 : area.containsMouse ? 0.08 : 0
-        Behavior on opacity { NumberAnimation { duration: 200 } }
+        Behavior on opacity { enabled: !Backend.lowPerformance; NumberAnimation { duration: 200 } }
     }
     RowLayout {
         id: row

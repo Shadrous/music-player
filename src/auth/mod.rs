@@ -42,7 +42,9 @@ pub mod http;
 use ytmusicapi::{AuthHeaders, YTMusic};
 
 /// OS-keyring identity for the stored browser cookie blob.
-pub const KEYRING_SERVICE: &str = "music-player";
+pub const KEYRING_SERVICE: &str = "spinwave";
+/// Pre-rename service name; a session found there moves to [`KEYRING_SERVICE`].
+const LEGACY_KEYRING_SERVICE: &str = "music-player";
 /// OS-keyring username for the stored browser cookie blob.
 pub const KEYRING_USER_COOKIE: &str = "ytmusic-browser-cookie";
 
@@ -111,6 +113,21 @@ impl KeyringStore {
         keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER_COOKIE)
             .map_err(|e| AuthError::Keyring(e.to_string()))
     }
+
+    /// Move a session saved under the old app name, so the rename doesn't
+    /// sign anyone out. Best-effort: any failure reads as "no session".
+    fn migrate_legacy() -> Result<Option<String>, AuthError> {
+        let Ok(old) = keyring::Entry::new(LEGACY_KEYRING_SERVICE, KEYRING_USER_COOKIE) else {
+            return Ok(None);
+        };
+        let Ok(cookie) = old.get_password() else {
+            return Ok(None);
+        };
+        if Self::entry()?.set_password(&cookie).is_ok() {
+            let _ = old.delete_credential();
+        }
+        Ok(Some(cookie))
+    }
 }
 
 impl SecretStore for KeyringStore {
@@ -123,7 +140,7 @@ impl SecretStore for KeyringStore {
     fn load_cookie(&self) -> Result<Option<String>, AuthError> {
         match Self::entry()?.get_password() {
             Ok(v) => Ok(Some(v)),
-            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(keyring::Error::NoEntry) => Self::migrate_legacy(),
             Err(e) => Err(AuthError::Keyring(e.to_string())),
         }
     }

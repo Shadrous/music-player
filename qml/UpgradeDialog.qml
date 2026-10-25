@@ -1,7 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import music_player
+import spinwave
 
 // Upgrade surface. Layout only: copy comes from Rust
 // (legal::upgrade_message + ToS link), link opens externally.

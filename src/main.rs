@@ -77,6 +77,8 @@ pub struct Backend {
     // Settings: reopen the last queue on launch / at the exact position.
     resume_enabled: bool,
     resume_position: bool,
+    // Settings: low-performance mode (see `prefs::Prefs::low_performance`).
+    low_performance: bool,
     // Restored track not started yet: (video id, second to seek to on Play).
     resume_at: Option<(String, u32)>,
     // Queue model (see `crate::playback::queue`): transport slots drive
@@ -264,6 +266,7 @@ impl Default for Backend {
             autoplay_on: true,
             resume_enabled: crate::prefs::load().resume,
             resume_position: crate::prefs::load().resume_position,
+            low_performance: crate::prefs::load().low_performance,
             resume_at: None,
             queue: Queue::new(),
             audio: RodioBackend::new(),
@@ -573,6 +576,7 @@ impl Backend {
         crate::prefs::save(crate::prefs::Prefs {
             resume: self.resume_enabled,
             resume_position: self.resume_position,
+            low_performance: self.low_performance,
         });
     }
 
@@ -949,6 +953,7 @@ impl Backend {
     qproperty!("autoplayOn", Member = autoplay_on, Notify = autoplay_on_changed);
     qproperty!("resumeEnabled", Member = resume_enabled, Notify = resume_enabled_changed);
     qproperty!("resumePosition", Member = resume_position, Notify = resume_position_changed);
+    qproperty!("lowPerformance", Member = low_performance, Notify = low_performance_changed);
     qproperty!("accountName", Member = account_name, Notify = account_name_changed);
     qproperty!("accountLabel", Member = account_label, Notify = account_label_changed);
     qproperty!("isLoggedIn", Member = is_logged_in, Notify = is_logged_in_changed);
@@ -1011,6 +1016,17 @@ impl Backend {
     fn resume_enabled_changed(&mut self);
     #[qsignal]
     fn resume_position_changed(&mut self);
+    #[qsignal]
+    fn low_performance_changed(&mut self);
+
+    #[qslot]
+    fn set_low_performance(&mut self, on: bool) {
+        if on != self.low_performance {
+            self.low_performance = on;
+            self.save_prefs();
+            self.low_performance_changed();
+        }
+    }
 
     #[qslot]
     fn set_resume_enabled(&mut self, on: bool) {
@@ -1176,7 +1192,7 @@ impl Backend {
     #[qslot]
     fn start_browser_signin(&mut self) -> String {
         self.cancel_browser_signin();
-        let python = std::env::var("MUSIC_PLAYER_PYTHON").unwrap_or_else(|_| "python3".to_string());
+        let python = std::env::var("SPINWAVE_PYTHON").unwrap_or_else(|_| "python3".to_string());
         let child = std::process::Command::new(&python)
             .arg("-c")
             .arg(crate::auth::BROWSER_LOGIN_HELPER)
@@ -1736,7 +1752,7 @@ impl Backend {
             self.emit_playback_props();
             return "error".to_string();
         }
-        if std::env::var("MUSIC_PLAYER_DEBUG_AUDIO").as_deref() == Ok("1") {
+        if std::env::var("SPINWAVE_DEBUG_AUDIO").as_deref() == Ok("1") {
             eprintln!("playback: started {}", pending.video_id);
         }
         let duration = ticket.duration_secs().unwrap_or(pending.row_duration);
@@ -1770,6 +1786,7 @@ impl Backend {
         // the queue is list-seeded. Cache is 90 s, memory-only.
         if let Some(next) = self.queue.next_up().cloned() {
             if !next.video_id.is_empty()
+                && !self.low_performance
                 && crate::playback::cached_ticket(&next.video_id).is_none()
             {
                 let gate = self.gate.clone();
@@ -1802,12 +1819,12 @@ fn maybe_restore_keyring_at_startup_log() {
 }
 
 /// Env override for the QML entry point (resolution step (a)).
-const QML_DIR_ENV_VAR: &str = "MUSIC_PLAYER_QML_DIR";
+const QML_DIR_ENV_VAR: &str = "SPINWAVE_QML_DIR";
 
 /// Resolve the QML entry point from disk (never `qrc:`).
 ///
 /// Resolution order:
-/// (a) `$MUSIC_PLAYER_QML_DIR/main.qml` when the env var is set,
+/// (a) `$SPINWAVE_QML_DIR/main.qml` when the env var is set,
 /// (b) executable-relative walk-up — `<exe-dir>/qml`, `<exe-dir>/../qml`,
 ///     `<exe-dir>/../../qml` (covers installed and `target/debug` layouts),
 /// (c) compile-time `CARGO_MANIFEST_DIR/qml/main.qml` (source-tree fallback —
@@ -1867,7 +1884,31 @@ Set ${QML_DIR_ENV_VAR} to the qml/ directory or run an installed binary."
     ))
 }
 
+/// One-time move of `~/.config/music-player` / `~/.cache/music-player`
+/// (pre-rename) to the `spinwave` names, keeping theme, prefs and cache.
+fn migrate_legacy_dirs() {
+    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+    for (var, fallback) in [("XDG_CONFIG_HOME", ".config"), ("XDG_CACHE_HOME", ".cache")] {
+        let base = std::env::var_os(var)
+            .map(std::path::PathBuf::from)
+            .or_else(|| home.as_ref().map(|h| h.join(fallback)));
+        if let Some(base) = base {
+            let (old, new) = (base.join("music-player"), base.join("spinwave"));
+            if old.is_dir() && !new.exists() {
+                let _ = std::fs::rename(old, new);
+            }
+        }
+    }
+}
+
 fn main() {
+    migrate_legacy_dirs();
+    // Low-performance mode: Qt's software renderer instead of the GPU. Must
+    // be set before Qt starts, hence "from the next launch". An explicit
+    // QT_QUICK_BACKEND from the user wins.
+    if crate::prefs::load().low_performance && std::env::var_os("QT_QUICK_BACKEND").is_none() {
+        std::env::set_var("QT_QUICK_BACKEND", "software");
+    }
     // Silent keyring-restore log (redacted presence only). The live probe +
     // prop updates happen in QML via `Backend.restoreSession()` on startup.
     maybe_restore_keyring_at_startup_log();
@@ -2416,7 +2457,7 @@ mod tests {
     /// `main.qml` files inside it; removed best-effort at the end.
     fn qml_scratch(name: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!(
-            "music_player_qml_{}_{}_{}",
+            "spinwave_qml_{}_{}_{}",
             name,
             std::process::id(),
             std::time::SystemTime::now()

@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Layouts
-import music_player
+import spinwave
 
 // Art pane (360px, radius 28): the current cover, or the design's spinning
 // M3 shapes when there is no art, with the queue-position chip. Layout only;
@@ -12,7 +12,7 @@ Rectangle {
     color: Theme.primaryContainer
 
     readonly property bool hasArt: art.ready
-    readonly property bool motion: Backend.isPlaying
+    readonly property bool motion: Backend.isPlaying && !Backend.lowPerformance
 
     // Shape fallback (also visible while the cover loads).
     Item {
