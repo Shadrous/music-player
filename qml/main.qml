@@ -15,7 +15,9 @@ ApplicationWindow {
     minimumWidth: 1100
     minimumHeight: 720
     title: Backend.title.length > 0 ? Backend.title + " · " + qsTr("Spinwave") : qsTr("Spinwave")
-    color: Theme.surface
+    // Transparent so the rounded background below gives the frameless
+    // window soft corners (the compositor only rounds decorated windows).
+    color: "transparent"
     font.family: "Roboto"
     // The app draws its own title bar (window controls next to search).
     flags: Qt.Window | Qt.FramelessWindowHint
@@ -60,6 +62,12 @@ ApplicationWindow {
     BrowserLoginDialog {
         id: browserLoginDialog
         onRequestCookieFallback: cookieLogin.open()
+    }
+
+    Rectangle {
+        anchors.fill: parent
+        radius: root.maximized ? 0 : 16
+        color: Theme.surface
     }
 
     // Empty space (margins, gaps, the art pane) moves the window; a double
