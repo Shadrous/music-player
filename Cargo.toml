@@ -24,3 +24,9 @@ souvlaki = { version = "0.8", default-features = false, features = ["use_zbus"] 
 [build-dependencies]
 cxx-build = "1"
 qtbridge-build-utils = "=0.2.0"
+
+# Windows browser sign-in (user-approved 2026-10-25): an Edge WebView2 window
+# (wry) on tao's event loop. Windows-only; Linux uses the WebKitGTK helper.
+[target.'cfg(windows)'.dependencies]
+wry = { version = "0.57", default-features = false }
+tao = "0.37"

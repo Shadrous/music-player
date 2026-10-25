@@ -1,7 +1,10 @@
 id: io.github.shadrous.Spinwave
-runtime: org.kde.Platform
-runtime-version: '6.11'
-sdk: org.kde.Sdk
+# GNOME's layer for WebKitGTK + PyGObject (the sign-in window); Qt 6.11 is
+# built below, since no Flathub layer has both.
+# shortcut: GNOME 51 drops webkit2gtk-4.1 (GTK3); port the sign-in helper to WebKitGTK 6.0 before moving past 50.
+runtime: org.gnome.Platform
+runtime-version: '50'
+sdk: org.gnome.Sdk
 sdk-extensions:
   - org.freedesktop.Sdk.Extension.rust-stable
 command: spinwave
@@ -23,7 +26,89 @@ build-options:
     - --share=network
   env:
     CARGO_HOME: /run/build/spinwave/cargo
+cleanup:
+  - /include
+  - /mkspecs
+  - /lib/cmake
+  - /lib/pkgconfig
+  - /lib/*.prl
+  - /doc
 modules:
+  - name: qtbase
+    buildsystem: cmake-ninja
+    builddir: true
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DQT_BUILD_EXAMPLES=OFF
+      - -DQT_BUILD_TESTS=OFF
+    # Build tools only; removed from the final package.
+    cleanup:
+      - /bin
+      - /libexec
+    sources:
+      - type: archive
+        url: https://download.qt.io/official_releases/qt/6.11/6.11.2/submodules/qtbase-everywhere-src-6.11.2.tar.xz
+        sha256: 5b2e00eccaf5a4d8c14134ffa0ea8dfd0a35ae1ffc7f8d87fa4305a1ed23cf22
+  - name: qtshadertools
+    buildsystem: cmake-ninja
+    builddir: true
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DQT_BUILD_EXAMPLES=OFF
+      - -DQT_BUILD_TESTS=OFF
+    # Build tools only; removed from the final package.
+    cleanup:
+      - /bin
+      - /libexec
+    sources:
+      - type: archive
+        url: https://download.qt.io/official_releases/qt/6.11/6.11.2/submodules/qtshadertools-everywhere-src-6.11.2.tar.xz
+        sha256: 805046b8b7757665586890b375940047e874ae3ab00adb6d3f2b38fc6b200b1c
+  - name: qtdeclarative
+    buildsystem: cmake-ninja
+    builddir: true
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DQT_BUILD_EXAMPLES=OFF
+      - -DQT_BUILD_TESTS=OFF
+    # Build tools only; removed from the final package.
+    cleanup:
+      - /bin
+      - /libexec
+    sources:
+      - type: archive
+        url: https://download.qt.io/official_releases/qt/6.11/6.11.2/submodules/qtdeclarative-everywhere-src-6.11.2.tar.xz
+        sha256: 215b7b70517e380123eabc6b92243f3c47b6f016a91d126057dbe53551c6b430
+  - name: qtsvg
+    buildsystem: cmake-ninja
+    builddir: true
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DQT_BUILD_EXAMPLES=OFF
+      - -DQT_BUILD_TESTS=OFF
+    # Build tools only; removed from the final package.
+    cleanup:
+      - /bin
+      - /libexec
+    sources:
+      - type: archive
+        url: https://download.qt.io/official_releases/qt/6.11/6.11.2/submodules/qtsvg-everywhere-src-6.11.2.tar.xz
+        sha256: d594337feca84c26fb67fe87b85e6a5c12fda404b611d905f9d138210c311876
+  - name: qtwayland
+    buildsystem: cmake-ninja
+    builddir: true
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DQT_BUILD_EXAMPLES=OFF
+      - -DQT_BUILD_TESTS=OFF
+    # Build tools only; removed from the final package.
+    cleanup:
+      - /bin
+      - /libexec
+    sources:
+      - type: archive
+        url: https://download.qt.io/official_releases/qt/6.11/6.11.2/submodules/qtwayland-everywhere-src-6.11.2.tar.xz
+        sha256: 8eb7615e39332a10f506e8dd70f02d5954bb5949ff54f6dcbf8bd6168222f9df
   - name: spinwave
     buildsystem: simple
     build-commands:

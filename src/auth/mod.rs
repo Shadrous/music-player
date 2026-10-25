@@ -59,6 +59,7 @@ pub const MUSIC_ORIGIN: &str = "https://music.youtube.com";
 /// Ephemeral WebKitGTK sign-in helper (see the file header). It is passed to
 /// `python3 -c`, so no helper file is written to disk and the cookie header
 /// travels only through the child's stdout pipe.
+#[cfg(not(windows))]
 pub const BROWSER_LOGIN_HELPER: &str = include_str!("../browser_login_helper.py");
 
 /// Auth failures. Never carries secret material — only static text plus

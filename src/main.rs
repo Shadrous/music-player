@@ -10,6 +10,7 @@ mod models;
 mod playback;
 mod media_controls;
 mod paths;
+mod sign_in;
 mod prefs;
 mod premium_gate;
 mod theme;
@@ -1330,21 +1331,34 @@ impl Backend {
         crate::legal::GOOGLE_PRIVACY_URL.to_string()
     }
 
-    /// Start the native sign-in window (ephemeral WebKitGTK helper) and
-    /// return `"started"` or a short user-facing failure. The helper prints
+    /// Start the native sign-in window (WebKitGTK helper; Edge WebView2 via
+    /// `spinwave --sign-in` on Windows, see `sign_in.rs`) and return
+    /// `"started"` or a short user-facing failure. The helper prints
     /// the Cookie header on stdout exactly once; [`Self::poll_browser_signin`]
     /// reads it after exit — no credential file, no shared browser profile.
     #[qslot]
     fn start_browser_signin(&mut self) -> String {
         self.cancel_browser_signin();
-        let python = std::env::var("SPINWAVE_PYTHON").unwrap_or_else(|_| "python3".to_string());
-        let child = std::process::Command::new(&python)
-            .arg("-c")
-            .arg(crate::auth::BROWSER_LOGIN_HELPER)
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn();
+        #[cfg(windows)]
+        let command = std::env::current_exe().map(|exe| {
+            let mut command = std::process::Command::new(exe);
+            command.arg("--sign-in");
+            command
+        });
+        #[cfg(not(windows))]
+        let command = {
+            let python = std::env::var("SPINWAVE_PYTHON").unwrap_or_else(|_| "python3".to_string());
+            let mut command = std::process::Command::new(python);
+            command.arg("-c").arg(crate::auth::BROWSER_LOGIN_HELPER);
+            std::io::Result::Ok(command)
+        };
+        let child = command.and_then(|mut command| {
+            command
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+        });
         match child {
             Ok(child) => {
                 self.browser_login_child = Some(child);
@@ -2127,6 +2141,10 @@ fn migrate_legacy_dirs() {
 }
 
 fn main() {
+    #[cfg(windows)]
+    if std::env::args().nth(1).as_deref() == Some("--sign-in") {
+        std::process::exit(sign_in::run());
+    }
     migrate_legacy_dirs();
     // Low-performance mode: Qt's software renderer instead of the GPU. Must
     // be set before Qt starts, hence "from the next launch". An explicit
