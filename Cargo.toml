@@ -30,3 +30,10 @@ qtbridge-build-utils = "=0.2.0"
 [target.'cfg(windows)'.dependencies]
 wry = { version = "0.57", default-features = false }
 tao = "0.37"
+
+# Keeps target/ small: line numbers for our backtraces, no debug info for deps.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
