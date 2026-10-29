@@ -124,22 +124,43 @@ impl KeyringStore {
         let Ok(cookie) = old.get_password() else {
             return Ok(None);
         };
-        if Self::entry()?.set_password(&cookie).is_ok() {
+        if KeyringStore.save_cookie(&cookie).is_ok() {
             let _ = old.delete_credential();
         }
         Ok(Some(cookie))
     }
 }
 
+/// Windows caps a credential at 2560 bytes and `set_password` stores
+/// UTF-16 (two bytes per char), so a full YouTube cookie blob overflowed it.
+/// The Windows store keeps raw UTF-8 bytes instead: twice the room.
+/// Sessions saved before that are UTF-16LE; the blob is ASCII JSON, so that
+/// form has a NUL in every other byte, which UTF-8 JSON never contains.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn decode_windows_secret(bytes: &[u8]) -> String {
+    if bytes.contains(&0) {
+        let units: Vec<u16> = bytes.as_chunks::<2>().0.iter().map(|&b| u16::from_le_bytes(b)).collect();
+        String::from_utf16_lossy(&units)
+    } else {
+        String::from_utf8_lossy(bytes).into_owned()
+    }
+}
+
 impl SecretStore for KeyringStore {
     fn save_cookie(&mut self, cookie_json: &str) -> Result<(), AuthError> {
-        Self::entry()?
-            .set_password(cookie_json)
-            .map_err(|e| AuthError::Keyring(e.to_string()))
+        #[cfg(windows)]
+        let saved = Self::entry()?.set_secret(cookie_json.as_bytes());
+        #[cfg(not(windows))]
+        let saved = Self::entry()?.set_password(cookie_json);
+        saved.map_err(|e| AuthError::Keyring(e.to_string()))
     }
 
     fn load_cookie(&self) -> Result<Option<String>, AuthError> {
-        match Self::entry()?.get_password() {
+        #[cfg(windows)]
+        let loaded = Self::entry()?.get_secret().map(|bytes| decode_windows_secret(&bytes));
+        #[cfg(not(windows))]
+        let loaded = Self::entry()?.get_password();
+        match loaded {
             Ok(v) => Ok(Some(v)),
             Err(keyring::Error::NoEntry) => Self::migrate_legacy(),
             Err(e) => Err(AuthError::Keyring(e.to_string())),
@@ -418,6 +439,13 @@ mod tests {
             let msg = e.to_string();
             assert!(!msg.contains("SAPISID") && !msg.contains("fake"));
         }
+    }
+
+    #[test]
+    fn windows_secret_reads_utf8_and_legacy_utf16() {
+        assert_eq!(decode_windows_secret(FAKE_BROWSER_JSON.as_bytes()), FAKE_BROWSER_JSON);
+        let legacy: Vec<u8> = FAKE_BROWSER_JSON.encode_utf16().flat_map(u16::to_le_bytes).collect();
+        assert_eq!(decode_windows_secret(&legacy), FAKE_BROWSER_JSON);
     }
 
     #[test]

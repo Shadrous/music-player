@@ -2717,6 +2717,11 @@ mod tests {
         dir
     }
 
+    /// What the resolver returns: on Windows `canonicalize` adds `\\?\`.
+    fn canonical(path: &std::path::Path) -> std::path::PathBuf {
+        std::fs::canonicalize(path).expect("canonical path")
+    }
+
     fn touch_main_qml(dir: &std::path::Path) {
         std::fs::write(dir.join("main.qml"), "import QtQuick\nItem {}\n").expect("main.qml");
     }
@@ -2729,7 +2734,7 @@ mod tests {
         touch_main_qml(&qml_dir);
         let found =
             super::find_qml_file(None, Some(&qml_dir), "/nonexistent-manifest").expect("env hit");
-        assert_eq!(found, qml_dir.join("main.qml"));
+        assert_eq!(found, canonical(&qml_dir.join("main.qml")));
         std::fs::remove_dir_all(&scratch).ok();
     }
 
@@ -2743,7 +2748,7 @@ mod tests {
         touch_main_qml(&qml_dir);
         let found = super::find_qml_file(Some(&exe_dir), None, "/nonexistent-manifest")
             .expect("exe-dir hit");
-        assert_eq!(found, qml_dir.join("main.qml"));
+        assert_eq!(found, canonical(&qml_dir.join("main.qml")));
 
         // target/debug layout: binary two levels below the root
         // (<exe-dir>/../../qml/main.qml).
@@ -2755,7 +2760,7 @@ mod tests {
         touch_main_qml(&root_qml);
         let found = super::find_qml_file(Some(&deep_exe), None, "/nonexistent-manifest")
             .expect("walk-up hit");
-        assert_eq!(found, root_qml.join("main.qml"));
+        assert_eq!(found, canonical(&root_qml.join("main.qml")));
         std::fs::remove_dir_all(&scratch).ok();
     }
 
