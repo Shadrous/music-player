@@ -10,7 +10,8 @@ ColumnLayout {
     property string title
     property var model
     property bool round: false
-    signal picked(string title, string sub)
+    // `id`: album browse id / artist channel id ("" when unknown).
+    signal picked(string title, string sub, string id)
 
     visible: repeater.count > 0
     spacing: 10
@@ -113,7 +114,8 @@ ColumnLayout {
                     anchors.fill: parent
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
-                    onClicked: grid.picked(card.name, card.model.title !== undefined ? card.model.artist : "")
+                    onClicked: grid.picked(card.name, card.model.title !== undefined ? card.model.artist : "",
+                        (card.model.title !== undefined ? card.model.browse_id : card.model.channel_id) || "")
                 }
                 Accessible.role: Accessible.Button
                 Accessible.name: card.name

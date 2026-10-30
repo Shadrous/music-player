@@ -1,4 +1,6 @@
 /target
+# UI fonts for dev runs: `bash packaging/fetch-fonts.sh fonts`.
+/fonts/
 # Local agent workflow notes and design scratch (not part of the app).
 AGENTS.md
 CLAUDE.md

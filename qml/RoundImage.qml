@@ -7,6 +7,8 @@ import spinwave
 Item {
     id: round
     property alias source: img.source
+    // Decode size (small row icons decode small, not at download size).
+    property alias sourceSize: img.sourceSize
     property real radius: 16
     readonly property bool ready: img.status === Image.Ready && String(img.source).length > 0
 

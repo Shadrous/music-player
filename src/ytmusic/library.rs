@@ -132,6 +132,7 @@ pub fn clear_library_cache() {
     }
     crate::disk_cache::remove("library");
     crate::disk_cache::remove_prefix("playlist-");
+    crate::disk_cache::remove("recent-collections");
     if let Ok(mut state) = library_state().lock() {
         *state = LoadState::Idle;
     }
@@ -141,14 +142,7 @@ pub fn clear_library_cache() {
 }
 
 fn track_row(track: &Track) -> serde_json::Value {
-    serde_json::json!({
-        "video_id": track.video_id,
-        "title": track.title,
-        "artist": track.artist,
-        "album": track.album,
-        "duration": track.duration,
-        "thumbnail_url": track.thumbnail_url,
-    })
+    track.to_json()
 }
 
 fn playlist_rows(items: &[serde_json::Value]) -> Vec<serde_json::Value> {
@@ -300,6 +294,39 @@ pub fn playlists_json() -> String {
     serde_json::to_string(&cached).unwrap_or_default()
 }
 
+/// Playlists a song can be added to: the library's cards minus Liked Music
+/// (that's the like button) and Episodes. `[]` before the library loads.
+pub fn editable_playlists_json() -> String {
+    let cards: Vec<serde_json::Value> = library_cache()
+        .lock()
+        .ok()
+        .and_then(|cache| cache.as_ref().map(|entry| entry.playlists.clone()))
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|card| {
+            let id = card.get("playlist_id").and_then(|v| v.as_str()).unwrap_or_default();
+            !matches!(id.trim_start_matches("VL"), "LM" | "SE" | "")
+        })
+        .collect();
+    serde_json::to_string(&cards).unwrap_or_default()
+}
+
+/// Drop `video_id` from the cached rows of `playlist_id` (memory and disk)
+/// right after removing it on YouTube Music, so the open list updates now.
+pub fn forget_playlist_row(playlist_id: &str, video_id: &str) {
+    let keep = |row: &serde_json::Value| row.get("video_id").and_then(|v| v.as_str()) != Some(video_id);
+    if let Ok(mut cache) = detail_cache().lock() {
+        if let Some(entry) = cache.as_mut().filter(|e| e.playlist_id == playlist_id) {
+            entry.rows.retain(keep);
+        }
+    }
+    let key = format!("playlist-{playlist_id}");
+    if let Some(serde_json::Value::Array(mut rows)) = crate::disk_cache::read(&key) {
+        rows.retain(keep);
+        crate::disk_cache::write(&key, &serde_json::Value::Array(rows));
+    }
+}
+
 /// Remote play-history JSON (empty before a load).
 pub fn history_json() -> String {
     let cached = library_cache()
@@ -308,6 +335,57 @@ pub fn history_json() -> String {
         .and_then(|cache| cache.as_ref().map(|entry| entry.history.clone()))
         .unwrap_or_default();
     serde_json::to_string(&cached).unwrap_or_default()
+}
+
+/// How many played playlists/albums "Recent playlists" remembers.
+const RECENT_LIMIT: usize = 24;
+
+/// Remember a playlist or album the user played from (newest first, one
+/// entry per id). On disk with the other account caches. Metadata only.
+pub fn remember_collection(entry: serde_json::Value) {
+    let saved = crate::disk_cache::read("recent-collections")
+        .and_then(|v| v.as_array().cloned())
+        .unwrap_or_default();
+    let list = push_recent(saved, entry);
+    crate::disk_cache::write("recent-collections", &serde_json::Value::Array(list));
+}
+
+fn push_recent(mut list: Vec<serde_json::Value>, entry: serde_json::Value) -> Vec<serde_json::Value> {
+    let id = entry.get("id").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+    if id.is_empty() {
+        return list;
+    }
+    list.retain(|e| e.get("id").and_then(|v| v.as_str()) != Some(id.as_str()));
+    list.insert(0, entry);
+    list.truncate(RECENT_LIMIT);
+    list
+}
+
+/// Recently played collections the library doesn't already show as a card
+/// (unsaved playlists and albums): `kind`, `id`, `title`, `subtitle`,
+/// `thumbnail_url`.
+pub fn recent_collections_json() -> String {
+    let recent = crate::disk_cache::read("recent-collections")
+        .and_then(|v| v.as_array().cloned())
+        .unwrap_or_default();
+    let saved: Vec<serde_json::Value> = serde_json::from_str(&playlists_json()).unwrap_or_default();
+    serde_json::to_string(&without_saved(recent, &saved)).unwrap_or_default()
+}
+
+fn without_saved(recent: Vec<serde_json::Value>, saved: &[serde_json::Value]) -> Vec<serde_json::Value> {
+    let bare = |id: &str| id.trim_start_matches("VL").to_string();
+    let saved_ids: Vec<String> = saved
+        .iter()
+        .filter_map(|card| card.get("playlist_id").and_then(|v| v.as_str()))
+        .map(bare)
+        .collect();
+    recent
+        .into_iter()
+        .filter(|e| {
+            let id = e.get("id").and_then(|v| v.as_str()).unwrap_or_default();
+            !saved_ids.contains(&bare(id))
+        })
+        .collect()
 }
 
 /// One page of rows + the next page's continuation token.
@@ -595,5 +673,20 @@ mod tests {
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0]["video_id"], "v2");
         assert_eq!(rows[0]["title"], "Detail");
+    }
+
+    #[test]
+    fn recent_collections_dedupe_and_skip_saved() {
+        let e = |id: &str| serde_json::json!({"kind": "playlist", "id": id, "title": id});
+        let list = push_recent(Vec::new(), e("PLa"));
+        let list = push_recent(list, e("MPREb"));
+        let list = push_recent(list, e("PLa"));
+        let list = push_recent(list, serde_json::json!({"id": ""}));
+        let ids: Vec<&str> = list.iter().map(|x| x["id"].as_str().unwrap()).collect();
+        assert_eq!(ids, ["PLa", "MPREb"]);
+        let saved = [serde_json::json!({"playlist_id": "VLPLa"})];
+        let left = without_saved(list, &saved);
+        assert_eq!(left.len(), 1);
+        assert_eq!(left[0]["id"], "MPREb");
     }
 }

@@ -4,16 +4,19 @@ import QtQuick.Layouts
 import spinwave
 
 // Shell: 80px nav rail | 360px art pane | content column (search, the
-// persistent Home/Library views, docked player). Navigation + dialog
-// open/close only; data and theme live in Rust. Home and Library stay alive
-// across navigation, so each keeps its models, scroll and cached rows.
+// persistent Home/Library views + the queue panel, docked player).
+// Navigation + dialog open/close only; data and theme live in Rust. Home and
+// Library stay alive across navigation, so each keeps its models, scroll
+// and cached rows. Narrow windows drop the art pane first, then let the
+// queue panel take the whole content area; the minimum size keeps the
+// essentials (nav, search, transport, queue).
 ApplicationWindow {
     id: root
     visible: true
     width: 1280
     height: 800
-    minimumWidth: 1100
-    minimumHeight: 720
+    minimumWidth: 720
+    minimumHeight: 560
     title: Backend.title.length > 0 ? Backend.title + " · " + qsTr("Spinwave") : qsTr("Spinwave")
     // Transparent so the rounded background below gives the frameless
     // window soft corners (the compositor only rounds decorated windows).
@@ -24,6 +27,10 @@ ApplicationWindow {
     readonly property bool maximized: visibility === Window.Maximized
     // Lyrics replace the cover art pane (mic button on the player).
     property bool lyricsOn: false
+    // The art pane needs room beside the content; narrower windows drop it.
+    readonly property bool coverShown: width >= 1180
+    // Queue side panel (player bar's queue button).
+    property bool queueOpen: false
 
     // Fusion controls (dialogs, busy indicators) follow the M3 palette.
     palette.window: Theme.surfaceContainerHigh
@@ -57,7 +64,23 @@ ApplicationWindow {
         interval: 250
         repeat: true
         running: true
-        onTriggered: Backend.pollMediaKeys()
+        onTriggered: {
+            Backend.pollMediaKeys()
+            Backend.pollActions()
+        }
+    }
+    // Artist / album links anywhere open the page view; playlists open in Library.
+    Connections {
+        target: Backend
+        function onPageChanged() {
+            if (Backend.pageKind === "playlist") {
+                contentHost.view = 1
+                libraryView.openPlaylist(Backend.pageId, Backend.pageTitle, "")
+                return
+            }
+            if (contentHost.view !== 4) contentHost.previousView = contentHost.view
+            contentHost.view = 4
+        }
     }
     // Playback URL/refill loads run on a worker; poll until the ticket lands.
     Timer {
@@ -122,6 +145,7 @@ ApplicationWindow {
         }
 
         CoverPanel {
+            visible: root.coverShown
             Layout.preferredWidth: 360
             Layout.fillHeight: true
             lyricsOn: root.lyricsOn
@@ -224,47 +248,108 @@ ApplicationWindow {
                 }
             }
 
-            Item {
-                id: contentHost
+            RowLayout {
+                id: contentRow
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                clip: true
-                property int view: 0
+                spacing: 12
+                // Too narrow for both: the queue takes the whole area.
+                readonly property bool queueOnly: root.queueOpen && width < 720
 
-                HeroGrid {
-                    id: home
-                    anchors.fill: parent
-                    visible: contentHost.view === 0
+                Item {
+                    id: contentHost
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    visible: !contentRow.queueOnly
+                    clip: true
+                    // 0 home, 1 library, 2 history, 3 settings, 4 artist/album page.
+                    property int view: 0
+                    property int previousView: 0
+
+                    HeroGrid {
+                        id: home
+                        anchors.fill: parent
+                        visible: contentHost.view === 0
+                    }
+                    PageView {
+                        anchors.fill: parent
+                        visible: contentHost.view === 4
+                        onBack: contentHost.view = contentHost.previousView
+                    }
+                    LibraryView {
+                        id: libraryView
+                        anchors.fill: parent
+                        visible: contentHost.view === 1 || contentHost.view === 2
+                        section: contentHost.view === 2 ? "history" : "library"
+                        activated: visible
+                        onOpenLogin: browserLoginDialog.open()
+                        onOpenUpgrade: upgradeDialog.open()
+                    }
+                    SettingsView {
+                        anchors.fill: parent
+                        visible: contentHost.view === 3
+                        onOpenBrowserLogin: browserLoginDialog.open()
+                        onOpenCookieLogin: cookieLogin.open()
+                    }
                 }
-                LibraryView {
-                    anchors.fill: parent
-                    visible: contentHost.view === 1 || contentHost.view === 2
-                    section: contentHost.view === 2 ? "history" : "library"
-                    activated: visible
-                    onOpenLogin: browserLoginDialog.open()
-                    onOpenUpgrade: upgradeDialog.open()
-                }
-                SettingsView {
-                    anchors.fill: parent
-                    visible: contentHost.view === 3
-                    onOpenBrowserLogin: browserLoginDialog.open()
-                    onOpenCookieLogin: cookieLogin.open()
+
+                QueuePanel {
+                    visible: root.queueOpen
+                    Layout.fillHeight: true
+                    Layout.fillWidth: contentRow.queueOnly
+                    Layout.preferredWidth: 340
+                    onClose: root.queueOpen = false
                 }
             }
 
             PlayerCard {
                 Layout.fillWidth: true
-                lyricsOn: root.lyricsOn
+                lyricsOn: root.lyricsOn && root.coverShown
+                // Lyrics show in the art pane, so they go with it.
+                lyricsAvailable: root.coverShown
                 onToggleLyrics: root.lyricsOn = !root.lyricsOn
-                queueOpen: contentHost.view === 0 && home.showQueue
-                onToggleQueue: {
-                    home.showQueue = !queueOpen;
-                    contentHost.view = 0;
-                    rail.activeTab = "home";
-                }
+                queueOpen: root.queueOpen
+                onToggleQueue: root.queueOpen = !root.queueOpen
                 onRequestUpgrade: upgradeDialog.open()
             }
         }
+    }
+
+    // One-line messages above the player ("Song link copied", playlist
+    // edits): M3 snackbar colors, gone after a few seconds.
+    Rectangle {
+        id: toast
+        property bool shown: false
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: 150
+        width: Math.min(toastLabel.implicitWidth + 48, parent.width - 48)
+        height: 48
+        radius: 24
+        color: Theme.inverseSurface
+        opacity: shown ? 1 : 0
+        visible: opacity > 0
+        Behavior on opacity { enabled: !Backend.lowPerformance; NumberAnimation { duration: 200 } }
+        Text {
+            id: toastLabel
+            anchors.centerIn: parent
+            width: Math.min(implicitWidth, toast.parent.width - 96)
+            text: Backend.toastText
+            color: Theme.inverseOnSurface
+            font.family: "Roboto"
+            font.pixelSize: 14
+            elide: Text.ElideRight
+        }
+        Timer { id: toastTimer; interval: 2800; onTriggered: toast.shown = false }
+        Connections {
+            target: Backend
+            function onToastChanged() {
+                toast.shown = true
+                toastTimer.restart()
+            }
+        }
+        Accessible.role: Accessible.AlertMessage
+        Accessible.name: Backend.toastText
     }
 
     // Frameless resize: thin edge/corner grips hand off to the compositor.

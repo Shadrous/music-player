@@ -5,12 +5,15 @@ import QtQuick.Shapes
 import spinwave
 
 // Docked player: now-playing + like | shuffle, prev, play, next, repeat |
-// volume + up-next toggle, then a wavy progress lane that seeks on click.
+// volume + up-next toggle, then a wavy progress lane that seeks on click
+// or drag (the seek lands on release).
 // Layout only: all state lives in the Backend singleton.
 Rectangle {
     id: card
     property bool queueOpen: false
     property bool lyricsOn: false
+    // Lyrics need the art pane; the shell hides it in narrow windows.
+    property bool lyricsAvailable: true
     signal toggleQueue()
     signal toggleLyrics()
     signal requestUpgrade()
@@ -21,6 +24,9 @@ Rectangle {
 
     readonly property bool loading: Backend.playbackState === "loading"
     readonly property real progress: Backend.duration > 0 ? Math.min(1, Math.max(0, Backend.position / Backend.duration)) : 0
+    // While the lane is held, show where the drag would seek to.
+    readonly property real shownProgress: seek.pressed ? seek.fraction : progress
+    readonly property real shownPosition: seek.pressed ? seek.fraction * Backend.duration : Backend.position
 
     function fmt(s) {
         s = Math.max(0, Math.round(s));
@@ -49,13 +55,18 @@ Rectangle {
 
         // Three equal columns keep the transport centred.
         Item {
+            id: controls
             Layout.fillWidth: true
             implicitHeight: 56
+            // Room on either side of the centred transport.
+            readonly property real sideWidth: (width - transport.width) / 2 - 12
+            // Narrow bars keep prev / play / next only in the middle.
+            readonly property bool essentialsOnly: width < 640
 
             RowLayout {
                 anchors.left: parent.left
                 anchors.verticalCenter: parent.verticalCenter
-                width: (parent.width - transport.width) / 2 - 12
+                width: controls.sideWidth
                 spacing: 12
 
                 Rectangle {
@@ -85,6 +96,8 @@ Rectangle {
                 ColumnLayout {
                     Layout.fillWidth: true
                     spacing: 0
+                    // Title opens the song's album (a single's own page),
+                    // the artist line the artist page.
                     Text {
                         Layout.fillWidth: true
                         text: Backend.title.length > 0 ? Backend.title : qsTr("Nothing playing")
@@ -92,7 +105,17 @@ Rectangle {
                         font.family: "Google Sans Flex"
                         font.pixelSize: 16
                         font.weight: Font.DemiBold
+                        font.underline: titleLink.containsMouse
                         elide: Text.ElideRight
+                        MouseArea {
+                            id: titleLink
+                            width: Math.min(parent.implicitWidth, parent.width)
+                            height: parent.height
+                            enabled: Backend.title.length > 0 && !card.loading
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: Backend.openCurrentAlbum()
+                        }
                     }
                     Text {
                         Layout.fillWidth: true
@@ -103,12 +126,24 @@ Rectangle {
                         color: Backend.playbackState === "error" ? Theme.tertiary : Theme.onSurfaceVariant
                         font.family: "Roboto"
                         font.pixelSize: 13
+                        font.underline: artistLink.containsMouse && !upgradeLink.enabled
                         elide: Text.ElideRight
                         MouseArea {
+                            id: upgradeLink
                             anchors.fill: parent
                             enabled: Backend.playbackState === "upgrade"
                             cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
                             onClicked: card.requestUpgrade()
+                        }
+                        MouseArea {
+                            id: artistLink
+                            width: Math.min(parent.implicitWidth, parent.width)
+                            height: parent.height
+                            enabled: !upgradeLink.enabled && !card.loading
+                                && Backend.playbackState !== "error" && Backend.artist.length > 0
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: Backend.openCurrentArtist()
                         }
                     }
                 }
@@ -129,6 +164,7 @@ Rectangle {
                 anchors.centerIn: parent
                 spacing: 6
                 IconButton {
+                    visible: !controls.essentialsOnly
                     icon: "shuffle"
                     label: qsTr("Shuffle")
                     iconSize: 22
@@ -172,6 +208,7 @@ Rectangle {
                     onClicked: Backend.next()
                 }
                 IconButton {
+                    visible: !controls.essentialsOnly
                     icon: Backend.loopMode === "one" ? "repeat_one" : "repeat"
                     label: Backend.loopMode === "off" ? qsTr("Repeat off")
                         : Backend.loopMode === "all" ? qsTr("Repeat all") : qsTr("Repeat one")
@@ -181,6 +218,7 @@ Rectangle {
                     onClicked: Backend.cycleLoop()
                 }
                 IconButton {
+                    visible: card.lyricsAvailable && !controls.essentialsOnly
                     icon: "mic_external_on"
                     label: card.lyricsOn ? qsTr("Hide lyrics") : qsTr("Show lyrics")
                     iconSize: 22
@@ -211,6 +249,10 @@ Rectangle {
                 }
                 Slider {
                     id: volume
+                    // Mute button + slider + Up next (40 + 96 + 40 + spacing);
+                    // narrower than that, drop the slider instead of
+                    // sliding under the transport.
+                    visible: controls.sideWidth >= 184
                     Layout.preferredWidth: 96
                     // Custom parts below set no implicit size, so give the hit area one.
                     Layout.preferredHeight: 32
@@ -263,7 +305,7 @@ Rectangle {
             spacing: 12
             Text {
                 Layout.preferredWidth: 36
-                text: card.fmt(Backend.position)
+                text: card.fmt(card.shownPosition)
                 color: Theme.onSurfaceVariant
                 font.family: "Roboto"
                 font.pixelSize: 12
@@ -273,7 +315,7 @@ Rectangle {
                 id: lane
                 Layout.fillWidth: true
                 implicitHeight: 24
-                readonly property real playedWidth: Math.max(0, (width - 8) * card.progress)
+                readonly property real playedWidth: Math.max(0, (width - 8) * card.shownProgress)
 
                 Item {
                     width: lane.playedWidth
@@ -320,10 +362,15 @@ Rectangle {
                     color: Theme.secondaryContainer
                 }
                 MouseArea {
+                    id: seek
+                    property real fraction: 0
                     anchors.fill: parent
                     enabled: !card.loading && Backend.duration > 0
+                    preventStealing: true
                     cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
-                    onClicked: (mouse) => Backend.seekTo(Math.round(Math.min(1, Math.max(0, mouse.x / width)) * Backend.duration))
+                    onPressed: (mouse) => fraction = Math.min(1, Math.max(0, mouse.x / width))
+                    onPositionChanged: (mouse) => fraction = Math.min(1, Math.max(0, mouse.x / width))
+                    onReleased: Backend.seekTo(Math.round(fraction * Backend.duration))
                 }
                 Accessible.role: Accessible.Slider
                 Accessible.name: qsTr("Seek, %1 of %2").arg(card.fmt(Backend.position)).arg(card.fmt(Backend.duration))
@@ -331,7 +378,7 @@ Rectangle {
             Text {
                 Layout.preferredWidth: 40
                 horizontalAlignment: Text.AlignRight
-                text: "-" + card.fmt(Math.max(0, Backend.duration - Backend.position))
+                text: "-" + card.fmt(Math.max(0, Backend.duration - card.shownPosition))
                 color: Theme.onSurfaceVariant
                 font.family: "Roboto"
                 font.pixelSize: 12

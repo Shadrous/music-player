@@ -25,6 +25,12 @@ pub struct QueueItem {
     pub duration_secs: u32,
     /// Cover art URL for the now-playing surfaces (metadata only).
     pub thumbnail_url: String,
+    /// Artist / album page ids (empty when unknown).
+    pub artist_id: String,
+    pub album_id: String,
+    /// The row's id in the playlist it was queued from (owned playlists
+    /// only); what removing it from that playlist needs.
+    pub set_video_id: String,
 }
 
 impl QueueItem {
@@ -38,9 +44,7 @@ impl QueueItem {
             video_id: video_id.into(),
             title: title.into(),
             artist: artist.into(),
-            album: String::new(),
-            duration_secs: 0,
-            thumbnail_url: String::new(),
+            ..Self::default()
         }
     }
 
@@ -96,6 +100,14 @@ impl QueueItem {
                 .to_string(),
             duration_secs,
             thumbnail_url: crate::models::thumbnail_url_from_json(v),
+            artist_id: crate::models::artist_id_from_json(v),
+            album_id: crate::models::album_id_from_json(v),
+            set_video_id: v
+                .get("setVideoId")
+                .or_else(|| v.get("set_video_id"))
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
         })
     }
 }
@@ -109,6 +121,9 @@ impl From<&crate::models::Track> for QueueItem {
             album: t.album.clone(),
             duration_secs: parse_duration_label(&t.duration),
             thumbnail_url: t.thumbnail_url.clone(),
+            artist_id: t.artist_id.clone(),
+            album_id: t.album_id.clone(),
+            set_video_id: t.set_video_id.clone(),
         }
     }
 }
@@ -205,6 +220,12 @@ impl Queue {
         self.current.as_ref()
     }
 
+    /// Currently playing item, mutable (e.g. forget its playlist id once
+    /// it's removed from that playlist).
+    pub fn current_mut(&mut self) -> Option<&mut QueueItem> {
+        self.current.as_mut()
+    }
+
     /// Next-up preview (the item Next would play, shuffle aside).
     pub fn next_up(&self) -> Option<&QueueItem> {
         self.upcoming.front()
@@ -251,6 +272,33 @@ impl Queue {
         self.upcoming.remove(index)
     }
 
+    /// Put `item` at `index` in the upcoming lane (clamped; `0` plays it
+    /// next, `usize::MAX` appends). A song already upcoming moves instead
+    /// of appearing twice. Returns where it landed.
+    pub fn insert_upcoming(&mut self, item: QueueItem, index: usize) -> usize {
+        let mut index = index;
+        if let Some(old) = self.upcoming.iter().position(|q| q.video_id == item.video_id) {
+            self.upcoming.remove(old);
+            if old < index {
+                index -= 1;
+            }
+        }
+        let index = index.min(self.upcoming.len());
+        self.upcoming.insert(index, item);
+        index
+    }
+
+    /// Move the upcoming row at `from` so it sits at `to` (both clamped).
+    /// `to` counts positions in the lane as it is before the move, so
+    /// dropping on the gap below a row lands right after it.
+    pub fn move_upcoming(&mut self, from: usize, to: usize) -> bool {
+        let Some(item) = self.upcoming.get(from).cloned() else {
+            return false;
+        };
+        self.insert_upcoming(item, to);
+        true
+    }
+
     /// Metadata-only JSON for one queue row (no URLs/secrets). Used to fill
     /// the queue popup's model.
     pub fn to_json(item: &QueueItem) -> serde_json::Value {
@@ -259,8 +307,16 @@ impl Queue {
             "title": item.title,
             "artist": item.artist,
             "album": item.album,
-            "duration": crate::models::format_duration_secs(item.duration_secs),
+            // Unknown length (0) stays blank like other rows, not "0:00".
+            "duration": if item.duration_secs > 0 {
+                crate::models::format_duration_secs(item.duration_secs)
+            } else {
+                String::new()
+            },
             "thumbnail_url": item.thumbnail_url,
+            "artist_id": item.artist_id,
+            "album_id": item.album_id,
+            "set_video_id": item.set_video_id,
         })
     }
 
@@ -443,6 +499,42 @@ mod tests {
         q
     }
 
+    fn lane(q: &Queue) -> Vec<String> {
+        q.upcoming_list().into_iter().map(|t| t.video_id).collect()
+    }
+
+    #[test]
+    fn insert_upcoming_places_and_dedupes() {
+        let mut q = queued(&["a", "b", "c"]);
+        assert_eq!(q.insert_upcoming(item("x"), 0), 0);
+        assert_eq!(lane(&q), ["x", "a", "b", "c"]);
+        q.insert_upcoming(item("y"), usize::MAX);
+        assert_eq!(lane(&q), ["x", "a", "b", "c", "y"]);
+        // Re-adding an upcoming song moves it (gap after "b" = index 3).
+        q.insert_upcoming(item("a"), 3);
+        assert_eq!(lane(&q), ["x", "b", "a", "c", "y"]);
+    }
+
+    #[test]
+    fn move_upcoming_drops_into_gaps() {
+        let mut q = queued(&["a", "b", "c", "d"]);
+        // Drag "a" to the gap after "c".
+        assert!(q.move_upcoming(0, 3));
+        assert_eq!(lane(&q), ["b", "c", "a", "d"]);
+        // Drag "d" to the top.
+        assert!(q.move_upcoming(3, 0));
+        assert_eq!(lane(&q), ["d", "b", "c", "a"]);
+        assert!(!q.move_upcoming(9, 0));
+    }
+
+    #[test]
+    fn row_json_leaves_unknown_duration_blank() {
+        let mut known = item("a");
+        known.duration_secs = 204;
+        assert_eq!(Queue::to_json(&known)["duration"], "3:24");
+        assert_eq!(Queue::to_json(&item("b"))["duration"], "");
+    }
+
     #[test]
     fn advance_plays_in_order() {
         let mut q = queued(&["a", "b", "c"]);
@@ -576,6 +668,7 @@ mod tests {
             video_id: "mock-vid-001".to_string(),
             duration: "3:24".to_string(),
             thumbnail_url: String::new(),
+            ..Default::default()
         };
         let q = QueueItem::from(&t);
         assert_eq!(q.video_id, "mock-vid-001");

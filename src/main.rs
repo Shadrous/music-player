@@ -121,6 +121,24 @@ pub struct Backend {
     // Local recent plays (metadata only) for the History tab; remote history
     // is loaded alongside the library and merged on read.
     recent_plays: Vec<QueueItem>,
+    // Thumbs-down given this session (YouTube Music exposes no disliked
+    // list to seed from). `ratings_version` bumps on every rating change so
+    // row bindings re-read `rating_of`.
+    disliked_ids: std::collections::HashSet<String>,
+    ratings_version: i32,
+    // Playlist the queue was started from ("" otherwise). Its owned rows
+    // carry a `set_video_id`, which is what "Delete from playlist" needs.
+    queue_source_playlist: String,
+    // One-line message at the bottom ("Link copied"); `toast_serial` bumps
+    // so the same text shows again.
+    toast_text: String,
+    toast_serial: i32,
+    // Worker results (playlist edits) waiting for `poll_actions` to show.
+    action_results: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+    // Artist / album page the shell shows ("" = none).
+    page_kind: String,
+    page_id: String,
+    page_title: String,
 }
 
 /// Live probe result computed off the UI thread, applied by `apply_probe`.
@@ -292,6 +310,15 @@ impl Default for Backend {
             search_query: String::new(),
             cover_source: String::new(),
             recent_plays: Vec::new(),
+            disliked_ids: std::collections::HashSet::new(),
+            ratings_version: 0,
+            queue_source_playlist: String::new(),
+            toast_text: String::new(),
+            toast_serial: 0,
+            action_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+            page_kind: String::new(),
+            page_id: String::new(),
+            page_title: String::new(),
             account_name: String::new(),
             account_label: account_label_for(
                 false,
@@ -308,6 +335,15 @@ impl Default for Backend {
             session_rechecking: false,
         }
     }
+}
+
+/// Pure core of `can_remove_from_playlist`: the row is the current song,
+/// the queue came from a playlist other than Liked Music (removing from
+/// that is unliking), and the song has an id in it.
+fn removable_from_source(source: &str, current: Option<&QueueItem>, video_id: &str) -> bool {
+    !source.is_empty()
+        && !matches!(source.trim_start_matches("VL"), "LM")
+        && current.is_some_and(|c| c.video_id == video_id && !c.set_video_id.is_empty())
 }
 
 /// QML string for a gate decision (camelCase to match `ConvertToCamelCase`
@@ -415,6 +451,43 @@ impl Backend {
         }
         self.queue_count = self.queue.len().min(i32::MAX as usize) as i32;
         self.queue_position = self.queue.position().min(i32::MAX as usize) as i32;
+    }
+
+    /// After an add / move: refresh the preview and tell QML.
+    fn emit_queue_edit(&mut self) {
+        self.refresh_queue_view();
+        self.queue_changed();
+        self.queue_count_changed();
+        self.queue_position_changed();
+        self.next_title_changed();
+        self.next_artist_changed();
+    }
+
+    /// Fold a rating into the like / dislike sets WITHOUT emitting (unit-
+    /// testable; `rate_song` emits and syncs). False when it can't apply:
+    /// signed out, no song, or an unknown rating.
+    fn apply_rating(&mut self, video_id: &str, rating: &str) -> bool {
+        if video_id.is_empty() || !self.is_logged_in || !matches!(rating, "LIKE" | "DISLIKE" | "INDIFFERENT") {
+            return false;
+        }
+        self.liked_ids.remove(video_id);
+        self.disliked_ids.remove(video_id);
+        match rating {
+            "LIKE" => {
+                self.liked_ids.insert(video_id.to_string());
+            }
+            "DISLIKE" => {
+                self.disliked_ids.insert(video_id.to_string());
+            }
+            _ => {}
+        }
+        // Ratings given before the Liked Music load lands win over it.
+        self.liked_overrides.insert(video_id.to_string(), rating == "LIKE");
+        if video_id == self.video_id {
+            self.liked = rating == "LIKE";
+        }
+        self.ratings_version = self.ratings_version.wrapping_add(1);
+        true
     }
 
     /// Adopt a queue item into the now-playing fields (keeps the old
@@ -930,6 +1003,7 @@ impl Backend {
     fn reset_likes(&mut self) {
         self.liked_gen += 1;
         self.liked_ids.clear();
+        self.disliked_ids.clear();
         self.liked_overrides.clear();
     }
 
@@ -957,13 +1031,14 @@ impl Backend {
         });
     }
 
-    /// Apply a finished Liked Music load (no-op until one lands).
-    fn merge_liked_load(&mut self) {
+    /// Apply a finished Liked Music load (no-op until one lands). True when
+    /// it merged, so the caller tells rows to re-read their ratings.
+    fn merge_liked_load(&mut self) -> bool {
         let Some((generation, ids)) = self.liked_load.lock().ok().and_then(|mut s| s.take()) else {
-            return;
+            return false;
         };
         if generation != self.liked_gen {
-            return;
+            return false;
         }
         self.liked_ids = ids;
         for (id, on) in self.liked_overrides.drain() {
@@ -978,6 +1053,9 @@ impl Backend {
             self.liked = liked;
             self.liked_changed();
         }
+        // Rows' thumbs re-read the fresh set (the caller emits).
+        self.ratings_version = self.ratings_version.wrapping_add(1);
+        true
     }
 
     /// Fold a gate-blocked play request into the QML props WITHOUT emitting
@@ -1068,6 +1146,12 @@ impl Backend {
     qproperty!("errorMessage", Member = error_message, Notify = error_message_changed);
     qproperty!("searchQuery", Member = search_query, Notify = search_query_changed);
     qproperty!("coverSource", Member = cover_source, Notify = cover_source_changed);
+    qproperty!("ratingsVersion", Member = ratings_version, Notify = ratings_changed);
+    qproperty!("toastText", Member = toast_text, Notify = toast_changed);
+    qproperty!("toastSerial", Member = toast_serial, Notify = toast_changed);
+    qproperty!("pageKind", Member = page_kind, Notify = page_changed);
+    qproperty!("pageId", Member = page_id, Notify = page_changed);
+    qproperty!("pageTitle", Member = page_title, Notify = page_changed);
 
     #[qsignal]
     fn is_playing_changed(&mut self);
@@ -1125,6 +1209,18 @@ impl Backend {
     fn resume_position_changed(&mut self);
     #[qsignal]
     fn low_performance_changed(&mut self);
+    #[qsignal]
+    fn ratings_changed(&mut self);
+    #[qsignal]
+    fn toast_changed(&mut self);
+    #[qsignal]
+    fn page_changed(&mut self);
+    /// The upcoming lane changed (add / move); counts may not have.
+    #[qsignal]
+    fn queue_changed(&mut self);
+    /// Rows were removed from a cached playlist; an open one reloads.
+    #[qsignal]
+    fn playlist_rows_changed(&mut self);
 
     #[qslot]
     fn set_low_performance(&mut self, on: bool) {
@@ -1289,26 +1385,246 @@ impl Backend {
     /// only). Signed-out sessions can't rate, so the heart stays put.
     #[qslot]
     fn toggle_heart(&mut self) {
-        if self.video_id.is_empty() || !self.is_logged_in {
+        let rating = if self.liked { "INDIFFERENT" } else { "LIKE" };
+        self.rate_song(self.video_id.clone(), rating.to_string());
+    }
+
+    /// `LIKE`, `DISLIKE` or `""` for a row's thumbs (re-read whenever
+    /// `ratingsVersion` changes).
+    #[qslot]
+    fn rating_of(&self, video_id: String) -> String {
+        if self.liked_ids.contains(&video_id) {
+            "LIKE".to_string()
+        } else if self.disliked_ids.contains(&video_id) {
+            "DISLIKE".to_string()
+        } else {
+            String::new()
+        }
+    }
+
+    /// Rate any song (`LIKE` | `DISLIKE` | `INDIFFERENT`). Optimistic: the
+    /// icons flip now, `rate_song` runs on a worker (best-effort).
+    #[qslot]
+    fn rate_song(&mut self, video_id: String, rating: String) {
+        if !self.apply_rating(&video_id, &rating) {
             return;
         }
-        let vid = self.video_id.clone();
-        self.liked = !self.liked;
-        if self.liked {
-            self.liked_ids.insert(vid.clone());
-        } else {
-            self.liked_ids.remove(&vid);
-        }
-        self.liked_overrides.insert(vid.clone(), self.liked);
-        let rating = if self.liked { "LIKE" } else { "INDIFFERENT" };
         std::thread::spawn(move || {
             if let Some((yt, runtime)) = restored_client() {
-                if runtime.block_on(yt.rate_song(&vid, rating)).is_err() {
-                    eprintln!("like sync failed");
+                if runtime.block_on(yt.rate_song(&video_id, &rating)).is_err() {
+                    eprintln!("rating sync failed");
                 }
             }
         });
+        self.ratings_changed();
         self.liked_changed();
+    }
+
+    /// Add a row to the queue at `index` of the upcoming lane (`-1` = the
+    /// end, `0` = right after the current song). With nothing playing it
+    /// starts playing instead.
+    #[qslot]
+    fn queue_add_row(&mut self, row_json: String, index: i32) {
+        let Some(item) = serde_json::from_str::<serde_json::Value>(&row_json)
+            .ok()
+            .as_ref()
+            .and_then(QueueItem::from_json)
+        else {
+            return;
+        };
+        if self.queue.current().is_none() {
+            self.play_queue(format!("[{row_json}]"), 0);
+            return;
+        }
+        let index = usize::try_from(index).unwrap_or(usize::MAX);
+        self.queue.insert_upcoming(item, index);
+        self.emit_queue_edit();
+    }
+
+    /// Drag-reorder the upcoming lane (`to` counts gaps before the move).
+    #[qslot]
+    fn queue_move(&mut self, from: i32, to: i32) {
+        let (Ok(from), Ok(to)) = (usize::try_from(from), usize::try_from(to)) else {
+            return;
+        };
+        if self.queue.move_upcoming(from, to) {
+            self.emit_queue_edit();
+        }
+    }
+
+    /// The current song as a flat row (`""` when nothing is playing), for
+    /// the top of the queue panel.
+    #[qslot]
+    fn current_row_json(&self) -> String {
+        self.queue
+            .current()
+            .map(|item| crate::playback::queue::Queue::to_json(item).to_string())
+            .unwrap_or_default()
+    }
+
+    /// Whether this row can be removed from the playlist it's playing from:
+    /// it's the current song, the queue came from a playlist, and the song
+    /// has an id in it (only owned playlists give one).
+    #[qslot]
+    fn can_remove_from_playlist(&self, video_id: String) -> bool {
+        removable_from_source(&self.queue_source_playlist, self.queue.current(), &video_id)
+    }
+
+    /// Remove the current song from the playlist it's playing from. The
+    /// cached list updates now; the result message follows from the worker.
+    #[qslot]
+    fn remove_from_playlist(&mut self, video_id: String) {
+        if !self.can_remove_from_playlist(video_id.clone()) {
+            return;
+        }
+        let playlist_id = self.queue_source_playlist.clone();
+        let set_video_id = self
+            .queue
+            .current_mut()
+            .map(|item| std::mem::take(&mut item.set_video_id))
+            .unwrap_or_default();
+        crate::ytmusic::library::forget_playlist_row(&playlist_id, &video_id);
+        self.playlist_rows_changed();
+        let results = self.action_results.clone();
+        std::thread::spawn(move || {
+            let videos = vec![serde_json::json!({ "videoId": video_id, "setVideoId": set_video_id })];
+            let ok = restored_client().is_some_and(|(yt, runtime)| {
+                runtime.block_on(yt.remove_playlist_items(&playlist_id, &videos)).is_ok()
+            });
+            let msg = if ok { "Removed from the playlist" } else { "Couldn't remove it from the playlist" };
+            if let Ok(mut results) = results.lock() {
+                results.push(msg.to_string());
+            }
+        });
+    }
+
+    /// Playlists a song can be added to (`[]` until the library loaded).
+    #[qslot]
+    fn editable_playlists_json(&self) -> String {
+        crate::ytmusic::library::editable_playlists_json()
+    }
+
+    /// Add a song to one of the account's playlists on a worker; the result
+    /// shows as a message. Songs already in it are skipped.
+    #[qslot]
+    fn add_to_playlist(&mut self, video_id: String, playlist_id: String, title: String) {
+        if video_id.is_empty() || playlist_id.is_empty() {
+            return;
+        }
+        let results = self.action_results.clone();
+        std::thread::spawn(move || {
+            let ok = restored_client().is_some_and(|(yt, runtime)| {
+                runtime
+                    .block_on(yt.add_playlist_items(&playlist_id, Some(vec![video_id]), None, true))
+                    .is_ok()
+            });
+            let msg = if ok { format!("Added to {title}") } else { format!("Couldn't add it to {title}") };
+            if let Ok(mut results) = results.lock() {
+                results.push(msg);
+            }
+        });
+    }
+
+    /// Public YouTube Music link for a song (Share copies it).
+    #[qslot]
+    fn share_link(&self, video_id: String) -> String {
+        format!("https://music.youtube.com/watch?v={video_id}")
+    }
+
+    /// Show a one-line message at the bottom of the window.
+    #[qslot]
+    fn show_toast(&mut self, text: String) {
+        self.toast_text = text;
+        self.toast_serial = self.toast_serial.wrapping_add(1);
+        self.toast_changed();
+    }
+
+    /// Show messages from finished workers (polled by the shell).
+    #[qslot]
+    fn poll_actions(&mut self) {
+        let pending = self.action_results.lock().map(|mut r| std::mem::take(&mut *r)).unwrap_or_default();
+        if let Some(last) = pending.into_iter().last() {
+            self.show_toast(last);
+        }
+    }
+
+    /// Open the artist (`kind` "artist", channel id) or album ("album",
+    /// browse id) page; the shell switches to it and loads it.
+    #[qslot]
+    fn open_page(&mut self, kind: String, id: String, title: String) {
+        if id.is_empty() {
+            return;
+        }
+        self.page_kind = kind;
+        self.page_id = id;
+        self.page_title = title;
+        self.page_changed();
+    }
+
+    /// The header's artist name: open the current song's artist page, or
+    /// search the name when the song carries no artist id.
+    #[qslot]
+    fn open_current_artist(&mut self) {
+        let id = self.queue.current().map(|item| item.artist_id.clone()).unwrap_or_default();
+        if id.is_empty() {
+            self.set_search_query(self.artist.clone());
+        } else {
+            self.open_page("artist".to_string(), id, self.artist.clone());
+        }
+    }
+
+    /// The player's title: open the current song's album. Without an album
+    /// id the page looks it up from the song (singles are albums too).
+    #[qslot]
+    fn open_current_album(&mut self) {
+        let Some(item) = self.queue.current().cloned() else {
+            return;
+        };
+        if !item.album_id.is_empty() {
+            let title = if item.album.is_empty() { item.title } else { item.album };
+            self.open_page("album".to_string(), item.album_id, title);
+        } else if !item.video_id.is_empty() {
+            self.open_page("album".to_string(), item.video_id, item.title);
+        }
+    }
+
+    #[qslot]
+    fn start_page_load(&self, gate_status: String) -> i32 {
+        crate::ytmusic::pages::start_page_load(&self.page_kind, &self.page_id, &gate_status) as i32
+    }
+
+    #[qslot]
+    fn page_load_status(&self, token: i32) -> String {
+        crate::ytmusic::pages::page_load_status(token as u64)
+    }
+
+    #[qslot]
+    fn page_json(&self) -> String {
+        crate::ytmusic::pages::page_json()
+    }
+
+    /// Played from a playlist or album: list it under "Recent playlists".
+    #[qslot]
+    fn remember_collection(&self, kind: String, id: String, title: String, subtitle: String, thumbnail_url: String) {
+        crate::ytmusic::library::remember_collection(serde_json::json!({
+            "kind": kind,
+            "id": id,
+            "title": title,
+            "subtitle": subtitle,
+            "thumbnail_url": thumbnail_url,
+        }));
+    }
+
+    #[qslot]
+    fn recent_collections_json(&self) -> String {
+        crate::ytmusic::library::recent_collections_json()
+    }
+
+    /// Row-icon sized variant of a cover URL (a few KB instead of a full
+    /// cover per row).
+    #[qslot]
+    fn small_thumb(&self, url: String) -> String {
+        crate::models::small_thumbnail_url(&url)
     }
 
     /// Upgrade prompt for the QML upgrade dialog (see `crate::legal`).
@@ -1601,6 +1917,14 @@ impl Backend {
     /// an inferred radio.
     #[qslot]
     fn play_queue(&mut self, rows_json: String, index: i32) {
+        self.play_queue_from(rows_json, index, String::new());
+    }
+
+    /// [`play_queue`](Self::play_queue) from a playlist's rows, remembering
+    /// the playlist so its songs can be removed from it while playing.
+    #[qslot]
+    fn play_queue_from(&mut self, rows_json: String, index: i32, playlist_id: String) {
+        self.queue_source_playlist = playlist_id;
         let values: Vec<serde_json::Value> =
             serde_json::from_str(&rows_json).unwrap_or_default();
         let items: Vec<QueueItem> = values.iter().filter_map(QueueItem::from_json).collect();
@@ -1750,7 +2074,8 @@ impl Backend {
     }
 
     /// `file://` URLs of fonts shipped beside the QML (`../fonts/*.ttf` in
-    /// packages); empty on a dev checkout, which uses installed fonts.
+    /// packages). A dev checkout uses installed fonts unless
+    /// `packaging/fetch-fonts.sh fonts` put them in the repo's `fonts/`.
     #[qslot]
     fn bundled_fonts_json(&self) -> String {
         let fonts = resolve_qml_file()
@@ -1856,7 +2181,9 @@ impl Backend {
     /// loop-off stops at the end of the lane).
     #[qslot]
     fn tick_position(&mut self) {
-        self.merge_liked_load();
+        if self.merge_liked_load() {
+            self.ratings_changed();
+        }
         if self.session_rechecking {
             self.poll_session();
         }
@@ -2140,6 +2467,25 @@ fn migrate_legacy_dirs() {
     }
 }
 
+/// Set an environment variable Qt will read at startup. On Windows Qt reads
+/// through the C runtime's own copy of the environment, which
+/// `std::env::set_var` (`SetEnvironmentVariableW`) never updates, so set
+/// that copy too.
+fn set_qt_env(key: &str, value: &str) {
+    std::env::set_var(key, value);
+    #[cfg(windows)]
+    {
+        extern "C" {
+            fn _putenv_s(name: *const std::ffi::c_char, value: *const std::ffi::c_char) -> i32;
+        }
+        let (Ok(key), Ok(value)) = (std::ffi::CString::new(key), std::ffi::CString::new(value)) else {
+            return;
+        };
+        // SAFETY: both are valid NUL-terminated strings; the CRT copies them.
+        unsafe { _putenv_s(key.as_ptr(), value.as_ptr()) };
+    }
+}
+
 fn main() {
     #[cfg(windows)]
     if std::env::args().nth(1).as_deref() == Some("--sign-in") {
@@ -2150,7 +2496,13 @@ fn main() {
     // be set before Qt starts, hence "from the next launch". An explicit
     // QT_QUICK_BACKEND from the user wins.
     if crate::prefs::load().low_performance && std::env::var_os("QT_QUICK_BACKEND").is_none() {
-        std::env::set_var("QT_QUICK_BACKEND", "software");
+        set_qt_env("QT_QUICK_BACKEND", "software");
+    }
+    // The QML restyles scrollbars, sliders and buttons, which Qt's native
+    // Windows styles ignore (and warn about). Fusion, the Linux default,
+    // allows it, so pin it everywhere. An explicit choice from the user wins.
+    if std::env::var_os("QT_QUICK_CONTROLS_STYLE").is_none() {
+        set_qt_env("QT_QUICK_CONTROLS_STYLE", "Fusion");
     }
     // Silent keyring-restore log (redacted presence only). The live probe +
     // prop updates happen in QML via `Backend.restoreSession()` on startup.
@@ -2180,6 +2532,35 @@ mod tests {
         Backend, QueueItem, advance_position, clamp_volume64, format_time, liked_ids_from_playlist,
         progress01, remaining_label,
     };
+
+    #[test]
+    fn ratings_switch_between_like_and_dislike() {
+        let mut b = Backend::default();
+        b.is_logged_in = true;
+        b.video_id = "v".to_string();
+        assert!(b.apply_rating("v", "LIKE"));
+        assert!(b.liked && b.liked_ids.contains("v"));
+        assert!(b.apply_rating("v", "DISLIKE"));
+        assert!(!b.liked && !b.liked_ids.contains("v") && b.disliked_ids.contains("v"));
+        assert!(b.apply_rating("v", "INDIFFERENT"));
+        assert!(b.liked_ids.is_empty() && b.disliked_ids.is_empty());
+        assert!(!b.apply_rating("v", "LOVE"));
+        b.is_logged_in = false;
+        assert!(!b.apply_rating("v", "LIKE"));
+    }
+
+    #[test]
+    fn only_the_playing_song_of_an_owned_playlist_is_removable() {
+        let mut owned = QueueItem::new("v", "T", "A");
+        owned.set_video_id = "s1".to_string();
+        assert!(super::removable_from_source("PL1", Some(&owned), "v"));
+        // Another row, no source playlist, Liked Music, or no playlist id.
+        assert!(!super::removable_from_source("PL1", Some(&owned), "other"));
+        assert!(!super::removable_from_source("", Some(&owned), "v"));
+        assert!(!super::removable_from_source("LM", Some(&owned), "v"));
+        assert!(!super::removable_from_source("PL1", Some(&QueueItem::new("v", "T", "A")), "v"));
+        assert!(!super::removable_from_source("PL1", None, "v"));
+    }
 
     #[test]
     fn playback_session_round_trips_paused_at_saved_second() {
@@ -2286,6 +2667,7 @@ mod tests {
             video_id: "vid-live-1".to_string(),
             duration: "3:24".to_string(),
             thumbnail_url: "https://i.ytimg.com/vi/vid-live-1/big.jpg".to_string(),
+            ..Default::default()
         };
         let mut b = Backend::default();
         let item = QueueItem::from(&live);

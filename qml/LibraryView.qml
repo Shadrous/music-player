@@ -3,7 +3,8 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import spinwave
 
-// Library surface: the account's playlists, playlist detail, and history.
+// Library surface: the account's playlists, recently played unsaved
+// playlists/albums, playlist detail, and history.
 // All loading is background + polled; rows are metadata-only. Rows are a
 // virtualized ListView (only visible rows exist), and playlist detail loads
 // page by page as the list nears its end.
@@ -25,6 +26,9 @@ Item {
     property bool activated: false
     property string selectedPlaylistId: ""
     property string selectedPlaylistTitle: ""
+    property string selectedPlaylistThumb: ""
+    // Played playlists/albums not saved as cards (Backend.recentCollectionsJson).
+    property var recentCollections: []
     property string statusText: ""
     property bool loading: false
     // A next-page fetch is running (rows stay; the footer shows a spinner).
@@ -32,6 +36,82 @@ Item {
     readonly property bool inDetail: section === "library" && selectedPlaylistId.length > 0
 
     PlaylistModel { id: playlists }
+
+    // Playlist / album card: art (or an icon), name, meta line.
+    component CollectionCard: Rectangle {
+        id: card
+        property string name
+        property string meta
+        property string art
+        property string fallbackIcon: "queue_music"
+        signal activated()
+        Layout.fillWidth: true
+        Layout.preferredWidth: 240
+        implicitHeight: 84
+        radius: 26 // art (16) + 10 inset: concentric
+        color: Theme.surfaceContainer
+        Rectangle {
+            anchors.fill: parent
+            radius: parent.radius
+            color: Theme.onSurface
+            opacity: area.pressed ? 0.12 : area.containsMouse ? 0.08 : 0
+        }
+        RowLayout {
+            anchors.fill: parent
+            anchors.margins: 10
+            spacing: 12
+            Rectangle {
+                Layout.preferredWidth: 64
+                Layout.preferredHeight: 64
+                radius: 16
+                color: Theme.secondaryContainer
+                Icon {
+                    anchors.centerIn: parent
+                    visible: !img.ready
+                    name: card.fallbackIcon
+                    filled: true
+                    color: Theme.onSecondaryContainer
+                }
+                RoundImage {
+                    id: img
+                    anchors.fill: parent
+                    radius: 16
+                    source: card.art
+                }
+            }
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: 0
+                Text {
+                    Layout.fillWidth: true
+                    text: card.name
+                    color: Theme.onSurface
+                    font.family: "Google Sans Flex"
+                    font.pixelSize: 16
+                    font.weight: Font.Medium
+                    elide: Text.ElideRight
+                }
+                Text {
+                    Layout.fillWidth: true
+                    text: card.meta
+                    color: Theme.onSurfaceVariant
+                    font.family: "Roboto"
+                    font.pixelSize: 12
+                    elide: Text.ElideRight
+                }
+            }
+        }
+        MouseArea {
+            id: area
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: card.activated()
+        }
+        Accessible.role: Accessible.Button
+        Accessible.name: card.name
+        Accessible.onPressAction: card.activated()
+    }
     TrackModel { id: detail }
     TrackModel { id: history }
 
@@ -59,6 +139,7 @@ Item {
         if (state === "ready" || state === "cached") {
             playlists.loadJson(Backend.playlistsJson())
             history.loadJson(Backend.historyRowsJson())
+            library.loadRecents()
             library.statusText = (playlists.rowCount() === 0 && history.rowCount() === 0)
                 ? qsTr("No playlists or history yet.") : ""
         } else if (state.indexOf("error:") === 0) {
@@ -67,13 +148,21 @@ Item {
             library.statusText = qsTr("Couldn't load your library. Try again.")
         }
     }
+    function loadRecents() {
+        library.recentCollections = JSON.parse(Backend.recentCollectionsJson())
+    }
+    function openCollection(item) {
+        if (item.kind === "album") Backend.openPage("album", item.id, item.title)
+        else library.openPlaylist(item.id, item.title, item.thumbnail_url)
+    }
     function countLabel(id, count) {
         if (id === "LM") return qsTr("Liked songs")
         return /[0-9]/.test(count) ? count + qsTr(" tracks") : qsTr("Playlist")
     }
-    function openPlaylist(id, title) {
+    function openPlaylist(id, title, thumb) {
         library.selectedPlaylistId = id
         library.selectedPlaylistTitle = title
+        library.selectedPlaylistThumb = thumb || ""
         library.loadingMore = false
         detail.clear()
         rowsView.positionViewAtBeginning()
@@ -130,6 +219,16 @@ Item {
         library.playlistToken = token
         playlistPoll.restart()
     }
+    // The visible rows become the queue; a playlist's rows remember it so
+    // the playing song can be removed from it.
+    // shortcut: Play/Shuffle queue the pages loaded so far, not the whole playlist; fetch the rest first if users ask.
+    function playRows(index) {
+        var rows = rowsView.model.rowsJson()
+        Backend.playQueueFrom(rows, index, library.inDetail ? library.selectedPlaylistId : "")
+        if (library.inDetail)
+            Backend.rememberCollection("playlist", library.selectedPlaylistId, library.selectedPlaylistTitle, "",
+                library.selectedPlaylistThumb || (JSON.parse(rows)[0] || {}).thumbnail_url || "")
+    }
 
     Timer { id: libraryPoll; interval: 100; repeat: true; onTriggered: library.pollLibrary() }
     Timer { id: playlistPoll; interval: 100; repeat: true; onTriggered: library.pollPlaylist() }
@@ -137,9 +236,15 @@ Item {
     Connections {
         target: Backend
         function onGateStatusChanged() { library.scheduleLibrary() }
+        function onPlaylistRowsChanged() {
+            if (library.inDetail) detail.loadJson(Backend.playlistRowsJson(library.selectedPlaylistId))
+        }
     }
     // Local plays change while away, so refresh history on every visit.
-    onVisibleChanged: if (visible && activated) history.loadJson(Backend.historyRowsJson())
+    onVisibleChanged: if (visible && activated) {
+        history.loadJson(Backend.historyRowsJson())
+        library.loadRecents()
+    }
     onActivatedChanged: if (activated) scheduleLibrary()
 
     // Signed-out / blocked empty state.
@@ -202,7 +307,7 @@ Item {
         clip: true
         boundsBehavior: Flickable.StopAtBounds
         ScrollBar.vertical: ScrollBar {}
-        model: library.inDetail ? detail : history
+        model: library.inDetail ? detail : library.section === "history" ? history : null
         onContentYChanged: library.maybeLoadMore()
 
         header: ColumnLayout {
@@ -279,7 +384,7 @@ Item {
                             fg: Theme.onPrimary
                             fontWeight: Font.DemiBold
                             enabled: rowsView.count > 0 && Backend.playbackState !== "loading"
-                            onClicked: Backend.playQueue(rowsView.model.rowsJson(), 0)
+                            onClicked: library.playRows(0)
                         }
                         PillButton {
                             icon: "shuffle"
@@ -287,7 +392,7 @@ Item {
                             enabled: rowsView.count > 0
                             onClicked: {
                                 if (!Backend.shuffle) Backend.toggleShuffle()
-                                Backend.playQueue(rowsView.model.rowsJson(), Math.floor(Math.random() * rowsView.count))
+                                library.playRows(Math.floor(Math.random() * rowsView.count))
                             }
                         }
                     }
@@ -304,88 +409,59 @@ Item {
                     rowSpacing: 8
                     Repeater {
                         model: playlists
-                        delegate: Rectangle {
-                            id: card
+                        delegate: CollectionCard {
                             required property string title
                             required property string playlist_id
                             required property string count
                             required property string thumbnail_url
-                            Layout.fillWidth: true
-                            Layout.preferredWidth: 240
-                            implicitHeight: 84
-                            radius: 26 // art (16) + 10 inset: concentric
-                            color: Theme.surfaceContainer
-                            Rectangle {
-                                anchors.fill: parent
-                                radius: parent.radius
-                                color: Theme.onSurface
-                                opacity: area.pressed ? 0.12 : area.containsMouse ? 0.08 : 0
-                            }
-                            RowLayout {
-                                anchors.fill: parent
-                                anchors.margins: 10
-                                spacing: 12
-                                Rectangle {
-                                    Layout.preferredWidth: 64
-                                    Layout.preferredHeight: 64
-                                    radius: 16
-                                    color: Theme.secondaryContainer
-                                    Icon {
-                                        anchors.centerIn: parent
-                                        visible: !art.ready
-                                        name: card.playlist_id === "LM" ? "favorite" : "queue_music"
-                                        filled: true
-                                        color: Theme.onSecondaryContainer
-                                    }
-                                    RoundImage {
-                                        id: art
-                                        anchors.fill: parent
-                                        radius: 16
-                                        source: card.thumbnail_url
-                                    }
-                                }
-                                ColumnLayout {
-                                    Layout.fillWidth: true
-                                    spacing: 0
-                                    Text {
-                                        Layout.fillWidth: true
-                                        text: card.title
-                                        color: Theme.onSurface
-                                        font.family: "Google Sans Flex"
-                                        font.pixelSize: 16
-                                        font.weight: Font.Medium
-                                        elide: Text.ElideRight
-                                    }
-                                    Text {
-                                        Layout.fillWidth: true
-                                        text: library.countLabel(card.playlist_id, card.count)
-                                        color: Theme.onSurfaceVariant
-                                        font.family: "Roboto"
-                                        font.pixelSize: 12
-                                        elide: Text.ElideRight
-                                    }
-                                }
-                            }
-                            MouseArea {
-                                id: area
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: library.openPlaylist(card.playlist_id, card.title)
-                            }
-                            Accessible.role: Accessible.Button
-                            Accessible.name: card.title
-                            Accessible.onPressAction: library.openPlaylist(card.playlist_id, card.title)
+                            name: title
+                            meta: library.countLabel(playlist_id, count)
+                            art: thumbnail_url
+                            fallbackIcon: playlist_id === "LM" ? "favorite" : "queue_music"
+                            onActivated: library.openPlaylist(playlist_id, title, thumbnail_url)
                         }
                     }
                 }
 
+                // Played but not saved: back to them in one click.
+                Text {
+                    Layout.leftMargin: 8
+                    Layout.topMargin: 8
+                    visible: recentGrid.visible
+                    text: qsTr("Recent playlists")
+                    color: Theme.onSurface
+                    font.family: "Google Sans Flex"
+                    font.pixelSize: 22
+                    font.weight: Font.DemiBold
+                }
+                GridLayout {
+                    id: recentGrid
+                    Layout.fillWidth: true
+                    Layout.leftMargin: 4
+                    Layout.rightMargin: 4
+                    visible: library.section === "library" && !library.inDetail && library.recentCollections.length > 0
+                    columns: Math.max(1, Math.floor((width + 8) / 248))
+                    columnSpacing: 8
+                    rowSpacing: 8
+                    Repeater {
+                        model: library.recentCollections
+                        delegate: CollectionCard {
+                            required property var modelData
+                            name: modelData.title
+                            meta: (modelData.kind === "album" ? qsTr("Album") : qsTr("Playlist"))
+                                + (modelData.subtitle ? " · " + modelData.subtitle : "")
+                            art: modelData.thumbnail_url
+                            fallbackIcon: modelData.kind === "album" ? "album" : "queue_music"
+                            onActivated: library.openCollection(modelData)
+                        }
+                    }
+                }
 
                 // Rounded top of the rows card.
                 Item {
                     Layout.fillWidth: true
                     visible: rowsView.count > 0
-                    implicitHeight: recent.visible ? recent.implicitHeight + 24 : 8
+                    implicitHeight: 8
                     clip: true
                     Rectangle {
                         width: parent.width
@@ -393,20 +469,10 @@ Item {
                         radius: 28
                         color: Theme.surfaceContainerLow
                     }
-                    Text {
-                        id: recent
-                        x: 16; y: 16
-                        visible: library.section === "library" && !library.inDetail
-                        text: qsTr("Recently played")
-                        color: Theme.onSurface
-                        font.family: "Google Sans Flex"
-                        font.pixelSize: 22
-                        font.weight: Font.DemiBold
-                    }
                 }
             }
 
-        // Tracks: playlist detail, history, or "recently played" under the cards.
+        // Tracks: playlist detail or history.
         delegate: Rectangle {
             id: slot
             required property int index
@@ -416,6 +482,9 @@ Item {
             required property string video_id
             required property string duration
             required property string thumbnail_url
+            required property string artist_id
+            required property string album_id
+            required property string set_video_id
             width: rowsView.width
             height: 58
             color: Theme.surfaceContainerLow
@@ -430,8 +499,10 @@ Item {
                 video_id: slot.video_id
                 duration: slot.duration
                 thumbnail_url: slot.thumbnail_url
-                // shortcut: Play/Shuffle queue the pages loaded so far, not the whole playlist; fetch the rest first if users ask.
-                playHandler: function() { Backend.playQueue(rowsView.model.rowsJson(), slot.index) }
+                artist_id: slot.artist_id
+                album_id: slot.album_id
+                set_video_id: slot.set_video_id
+                playHandler: function() { library.playRows(slot.index) }
             }
         }
 

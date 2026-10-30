@@ -4,19 +4,14 @@ import QtQuick.Layouts
 import spinwave
 
 // Home / search view: header (now playing or the search context), the song
-// list with a Songs | Up next switch + autoplay, then album and artist
-// cards. Layout only: rows come from Rust models, loads are background +
-// polled.
+// list, then album and artist cards. The queue has its own side panel.
+// Layout only: rows come from Rust models, loads are background + polled.
 ScrollView {
     id: browse
     clip: true
     contentWidth: availableWidth
 
-    // Bound by the shell: the player bar's queue button flips this.
-    property bool showQueue: false
-
     TrackModel { id: tracks }
-    TrackModel { id: queue }
     AlbumModel { id: albums }
     ArtistModel { id: artists }
 
@@ -93,9 +88,6 @@ ScrollView {
             artists.loadHome(Backend.gateStatus)
         }, qsTr("Couldn't load music. Try again."))
     }
-    function refreshQueue() {
-        if (browse.showQueue) queue.loadJson(Backend.queueRowsJson())
-    }
     function playList(index) {
         Backend.playQueue(tracks.rowsJson(), index)
     }
@@ -104,14 +96,11 @@ ScrollView {
     Timer { id: searchPoll; interval: 100; repeat: true; onTriggered: browse.pollSearch() }
 
     Component.onCompleted: browse.scheduleHome()
-    onShowQueueChanged: refreshQueue()
     Connections {
         target: Backend
         function onGateStatusChanged() { browse.scheduleSearch() }
         function onSearchQueryChanged() { browse.scheduleSearch() }
         function onSessionLoadingChanged() { if (Backend.sessionLoading) browse.scheduleHome() }
-        function onVideoIdChanged() { browse.refreshQueue() }
-        function onQueueCountChanged() { browse.refreshQueue() }
     }
 
     ColumnLayout {
@@ -199,10 +188,13 @@ ScrollView {
                     font.weight: Font.Medium
                     elide: Text.ElideRight
                     Layout.maximumWidth: browse.availableWidth / 2
+                    font.underline: artistArea.containsMouse
                     MouseArea {
+                        id: artistArea
                         anchors.fill: parent
+                        hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
-                        onClicked: Backend.setSearchQuery(Backend.artist)
+                        onClicked: Backend.openCurrentArtist()
                     }
                 }
                 Text {
@@ -248,7 +240,7 @@ ScrollView {
             }
         }
 
-        // ---- Songs / Up next ------------------------------------------
+        // ---- Songs ------------------------------------------------------
         Rectangle {
             Layout.fillWidth: true
             implicitHeight: songs.implicitHeight + 16
@@ -261,53 +253,29 @@ ScrollView {
                 anchors.margins: 8
                 spacing: 2
 
-                RowLayout {
-                    Layout.fillWidth: true
+                Text {
                     Layout.margins: 8
-                    Layout.bottomMargin: 10
-                    Segmented {
-                        current: browse.showQueue ? 1 : 0
-                        model: [
-                            { icon: "album", text: qsTr("Songs") },
-                            { icon: "queue_music", text: qsTr("Up next") }
-                        ]
-                        onPicked: (i) => browse.showQueue = i === 1
-                    }
-                    Item { Layout.fillWidth: true }
-                    Toggle {
-                        text: qsTr("Autoplay similar songs")
-                        checked: Backend.autoplayOn
-                        onToggled: Backend.toggleAutoplay()
-                    }
+                    text: qsTr("Songs")
+                    color: Theme.onSurface
+                    font.family: "Google Sans Flex"
+                    font.pixelSize: 22
+                    font.weight: Font.DemiBold
                 }
 
                 Repeater {
                     id: songRows
-                    model: browse.showQueue ? queue : tracks
+                    model: tracks
                     delegate: TrackRow {
                         Layout.fillWidth: true
-                        playHandler: browse.showQueue
-                            ? function() { Backend.playQueueRow(video_id) }
-                            : function() { browse.playList(index) }
+                        playHandler: function() { browse.playList(index) }
                     }
                 }
 
-                // Up next lists only the next 100 (UP_NEXT_ROWS in Rust).
-                Text {
-                    Layout.fillWidth: true
-                    Layout.margins: 16
-                    visible: browse.showQueue && Backend.queueCount - 1 > songRows.count && songRows.count > 0
-                    text: qsTr("+ %1 more in the queue").arg(Backend.queueCount - 1 - songRows.count)
-                    color: Theme.onSurfaceVariant
-                    font.family: "Roboto"
-                    font.pixelSize: 14
-                }
                 Text {
                     Layout.fillWidth: true
                     Layout.margins: 16
                     visible: songRows.count === 0
-                    text: browse.showQueue ? qsTr("Nothing up next. Play a song to start a queue.")
-                        : browse.loading ? qsTr("Loading…") : qsTr("No songs here yet.")
+                    text: browse.loading ? qsTr("Loading…") : qsTr("No songs here yet.")
                     color: Theme.onSurfaceVariant
                     font.family: "Roboto"
                     font.pixelSize: 14
@@ -320,14 +288,16 @@ ScrollView {
             Layout.fillWidth: true
             title: browse.searching ? qsTr("Albums") : qsTr("More to explore")
             model: albums
-            onPicked: (title, sub) => Backend.setSearchQuery(title + " " + sub)
+            onPicked: (title, sub, id) => id.length > 0
+                ? Backend.openPage("album", id, title) : Backend.setSearchQuery(title + " " + sub)
         }
         CardGrid {
             Layout.fillWidth: true
             title: qsTr("Artists")
             model: artists
             round: true
-            onPicked: (title, sub) => Backend.setSearchQuery(title)
+            onPicked: (title, sub, id) => id.length > 0
+                ? Backend.openPage("artist", id, title) : Backend.setSearchQuery(title)
         }
 
         LegalLinks { Layout.leftMargin: 8; Layout.bottomMargin: 8 }

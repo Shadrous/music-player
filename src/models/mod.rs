@@ -24,7 +24,9 @@ use std::collections::HashMap;
 use qtbridge::{QListModel, QListModelBase, QModelItem, qobject};
 
 /// A track row: roles are `title`, `artist`, `album`, `video_id`, `duration`,
-/// `thumbnail_url` (live art; empty → wash fallback).
+/// `thumbnail_url` (live art; empty → wash fallback), plus `artist_id` /
+/// `album_id` (open the artist / album page; empty when unknown) and
+/// `set_video_id` (the row's id inside an owned playlist; empty elsewhere).
 #[derive(QModelItem, Clone, Default, Debug, PartialEq)]
 pub struct Track {
     pub title: String,
@@ -33,6 +35,9 @@ pub struct Track {
     pub video_id: String,
     pub duration: String,
     pub thumbnail_url: String,
+    pub artist_id: String,
+    pub album_id: String,
+    pub set_video_id: String,
 }
 
 /// An album card: roles are `title`, `artist`, `browse_id`, `year`,
@@ -72,7 +77,7 @@ fn str_at_any(v: &ytmusicapi::Json, keys: &[&str]) -> String {
 
 /// First artist name: `artist` string, else `artists[0].name` (live song
 /// shape), else `author` (live playlist-shaped search rows). Pure, tested.
-fn artist_name_from_json(v: &ytmusicapi::Json) -> String {
+pub(crate) fn artist_name_from_json(v: &ytmusicapi::Json) -> String {
     if let Some(s) = v.get("artist").and_then(|x| x.as_str()) {
         if !s.trim().is_empty() {
             return s.to_string();
@@ -88,6 +93,35 @@ fn artist_name_from_json(v: &ytmusicapi::Json) -> String {
                 .map(str::to_string)
         })
         .unwrap_or_default()
+}
+
+/// First artist's channel id: flat `artist_id`, else `artists[0].id` (live
+/// song shape). Empty when unknown (plain-text artist). Pure, tested.
+pub(crate) fn artist_id_from_json(v: &ytmusicapi::Json) -> String {
+    let flat = str_at(v, "artist_id");
+    if !flat.is_empty() {
+        return flat;
+    }
+    v.get("artists")
+        .and_then(|x| x.as_array())
+        .and_then(|xs| xs.first())
+        .and_then(|a| a.get("id").and_then(|n| n.as_str()))
+        .unwrap_or_default()
+        .to_string()
+}
+
+/// Album browse id: flat `album_id`, else `album.id` (live song shape).
+/// Empty when unknown. Pure, tested.
+pub(crate) fn album_id_from_json(v: &ytmusicapi::Json) -> String {
+    let flat = str_at(v, "album_id");
+    if !flat.is_empty() {
+        return flat;
+    }
+    v.get("album")
+        .and_then(|x| x.get("id"))
+        .and_then(|n| n.as_str())
+        .unwrap_or_default()
+        .to_string()
 }
 
 /// Album name: `album` string, else `album.name` (live song shape). Pure.
@@ -138,6 +172,26 @@ pub fn duration_label_from_json(v: &ytmusicapi::Json) -> String {
 /// images use `hqdefault`/`maxresdefault` filenames. Unknown hosts pass
 /// through untouched. Pure and unit-tested.
 pub fn hires_thumbnail_url(url: &str) -> String {
+    // `hqdefault` is 480×360 and always available; maxres can 404 on some
+    // uploads, so prefer the guaranteed size.
+    resize_thumbnail_url(url, 544, &["/mqdefault.jpg", "/default.jpg"], "/hqdefault.jpg")
+}
+
+/// Shrink a thumbnail URL for a ~40px row icon, so a list costs a few KB
+/// per row instead of a full cover each. `mqdefault` (320×180) is the
+/// smallest YouTube still without letterbox bars. Pure and unit-tested.
+pub fn small_thumbnail_url(url: &str) -> String {
+    resize_thumbnail_url(
+        url,
+        96,
+        &["/maxresdefault.jpg", "/sddefault.jpg", "/hqdefault.jpg", "/default.jpg"],
+        "/mqdefault.jpg",
+    )
+}
+
+/// Rewrite a Google content URL's `w`/`h`/`s` size tokens to `px`, or swap
+/// the first of `yt_from` for `yt_to` in a YouTube static image URL.
+fn resize_thumbnail_url(url: &str, px: u32, yt_from: &[&str], yt_to: &str) -> String {
     let url = url.trim();
     if url.is_empty() {
         return String::new();
@@ -164,11 +218,11 @@ pub fn hires_thumbnail_url(url: &str) -> String {
                         })
                     };
                     if part.starts_with('w') && numeric(part) {
-                        "w544".to_string()
+                        format!("w{px}")
                     } else if part.starts_with('h') && numeric(part) {
-                        "h544".to_string()
+                        format!("h{px}")
                     } else if part.starts_with('s') && numeric(part) {
-                        "s544".to_string()
+                        format!("s{px}")
                     } else {
                         part.to_string()
                     }
@@ -177,12 +231,10 @@ pub fn hires_thumbnail_url(url: &str) -> String {
             return format!("{}{}", &url[..eq + 1], upgraded.join("-"));
         }
     }
-    // YouTube static images: `hqdefault` is 480×360 and always available;
-    // maxres can 404 on some uploads, so prefer the guaranteed size.
     if url.contains("ytimg.com") || url.contains("img.youtube.com") {
-        for size in ["/mqdefault.jpg", "/default.jpg"] {
+        for size in yt_from {
             if url.contains(size) {
-                return url.replace(size, "/hqdefault.jpg");
+                return url.replace(size, yt_to);
             }
         }
     }
@@ -247,7 +299,26 @@ impl Track {
             video_id: str_at_any(v, &["videoId", "video_id"]),
             duration: duration_label_from_json(v),
             thumbnail_url: thumbnail_url_from_json(v),
+            artist_id: artist_id_from_json(v),
+            album_id: album_id_from_json(v),
+            set_video_id: str_at_any(v, &["setVideoId", "set_video_id"]),
         }
+    }
+
+    /// Flat metadata-only row (the shape `from_json` reads back): what QML
+    /// models, the queue and the disk cache pass around.
+    pub fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "video_id": self.video_id,
+            "title": self.title,
+            "artist": self.artist,
+            "album": self.album,
+            "duration": self.duration,
+            "thumbnail_url": self.thumbnail_url,
+            "artist_id": self.artist_id,
+            "album_id": self.album_id,
+            "set_video_id": self.set_video_id,
+        })
     }
 
     /// True when the row carries anything renderable.
@@ -586,20 +657,7 @@ impl TrackModel {
     /// visible list. No URLs or secrets.
     #[qslot]
     fn rows_json(&self) -> String {
-        let rows: Vec<serde_json::Value> = self
-            .items
-            .iter()
-            .map(|t| {
-                serde_json::json!({
-                    "video_id": t.video_id,
-                    "title": t.title,
-                    "artist": t.artist,
-                    "album": t.album,
-                    "duration": t.duration,
-                    "thumbnail_url": t.thumbnail_url,
-                })
-            })
-            .collect();
+        let rows: Vec<serde_json::Value> = self.items.iter().map(Track::to_json).collect();
         serde_json::to_string(&rows).unwrap_or_default()
     }
 
@@ -725,6 +783,18 @@ impl AlbumModel {
 
 #[qobject(Base = QListModel, ConvertToCamelCase)]
 impl AlbumModel {
+    /// Replace rows from a JSON array of cards (artist/album page shelves).
+    #[qslot]
+    fn load_json(&mut self, rows: String) {
+        let values: Vec<serde_json::Value> = serde_json::from_str(&rows).unwrap_or_default();
+        while self.len() > 0 {
+            self.pop();
+        }
+        for item in values.iter().map(Album::from_json).filter(|x| !x.browse_id.is_empty()) {
+            self.push(item);
+        }
+    }
+
     /// Reload mock rows (notified; requires attached QML proxy).
     #[qslot]
     fn load_mocks(&mut self) {
@@ -850,6 +920,18 @@ impl ArtistModel {
 
 #[qobject(Base = QListModel, ConvertToCamelCase)]
 impl ArtistModel {
+    /// Replace rows from a JSON array of cards (artist/album page shelves).
+    #[qslot]
+    fn load_json(&mut self, rows: String) {
+        let values: Vec<serde_json::Value> = serde_json::from_str(&rows).unwrap_or_default();
+        while self.len() > 0 {
+            self.pop();
+        }
+        for item in values.iter().map(Artist::from_json).filter(|x| !x.channel_id.is_empty()) {
+            self.push(item);
+        }
+    }
+
     /// Reload mock rows (notified; requires attached QML proxy).
     #[qslot]
     fn load_mocks(&mut self) {
@@ -1222,5 +1304,33 @@ mod tests {
             "https://i.ytimg.com/vi/x/sddefault.jpg"
         );
         assert_eq!(hires_thumbnail_url(""), "");
+    }
+
+    #[test]
+    fn small_thumbnails_shrink_google_and_ytimg_sizes() {
+        assert_eq!(
+            small_thumbnail_url("https://lh3.googleusercontent.com/abc=w544-h544-l90-rj"),
+            "https://lh3.googleusercontent.com/abc=w96-h96-l90-rj"
+        );
+        assert_eq!(
+            small_thumbnail_url("https://i.ytimg.com/vi/x/hqdefault.jpg"),
+            "https://i.ytimg.com/vi/x/mqdefault.jpg"
+        );
+        assert_eq!(small_thumbnail_url(""), "");
+    }
+
+    #[test]
+    fn track_ids_read_live_and_flat_shapes() {
+        let live = serde_json::json!({
+            "videoId": "v", "title": "T", "setVideoId": "s1",
+            "artists": [{"name": "A", "id": "UCa"}], "album": {"name": "Al", "id": "MPREb1"}
+        });
+        let t = Track::from_json(&live);
+        assert_eq!((t.artist_id.as_str(), t.album_id.as_str(), t.set_video_id.as_str()), ("UCa", "MPREb1", "s1"));
+        // The flat row round-trips.
+        assert_eq!(Track::from_json(&t.to_json()), t);
+        // Plain-text artist/album: no ids.
+        let plain = Track::from_json(&serde_json::json!({"videoId": "v", "artist": "A", "album": "Al"}));
+        assert!(plain.artist_id.is_empty() && plain.album_id.is_empty());
     }
 }
